@@ -10,13 +10,13 @@ import Foundation
 typealias RunOnce = [String: Date]
 
 struct OutsetPreferences: Codable {
-    var waitForNetwork: Bool = false
-    var networkTimeout: Int = 180
+    var waitForNetwork: Bool = defaultWaitForNetwork
+    var networkTimeout: Int = defaultNetworkTimeout
     var ignoredUsers: [String] = []
     var overrideLoginOnce: RunOnce = RunOnce()
     // Optional timeout in seconds for background scripts. When nil, background
     // scripts run until they exit naturally with no enforced limit.
-    var backgroundScriptTimeout: Int? = nil
+    var backgroundScriptTimeout: Int = defaultBackgroundScriptTimeout
     // Optional base64-encoded Ed25519 public key. When present (typically delivered
     // via MDM), every script must carry a valid embedded `# ed25519: <sig>` comment.
     // Scripts without a valid signature are refused.
@@ -33,7 +33,7 @@ struct OutsetPreferences: Codable {
 }
 
 func writeOutsetPreferences(prefs: OutsetPreferences) {
-    if debugMode { showPrefrencePath("Stor") } // (typo?) showPreferencePath
+    if debugMode { showPreferencePath("Stor") }
 
     let defaults = UserDefaults.standard
     let appID = Bundle.main.bundleIdentifier! as CFString
@@ -73,7 +73,7 @@ func writeOutsetPreferences(prefs: OutsetPreferences) {
 func loadOutsetPreferences() -> OutsetPreferences {
 
     if debugMode {
-        showPrefrencePath("Load")
+        showPreferencePath("Load")
     }
 
     let defaults = UserDefaults.standard
@@ -86,7 +86,7 @@ func loadOutsetPreferences() -> OutsetPreferences {
         outsetPrefs.ignoredUsers = rootPreferenceValue("ignored_users") as? [String] ?? []
         outsetPrefs.overrideLoginOnce = rootPreferenceValue("override_login_once") as? RunOnce ?? [:]
         outsetPrefs.waitForNetwork = boolPreference(rootPreferenceValue("wait_for_network")) ?? false
-        outsetPrefs.backgroundScriptTimeout = intPreference(rootPreferenceValue("background_script_timeout"))
+        outsetPrefs.backgroundScriptTimeout = intPreference(rootPreferenceValue("background_script_timeout")) ?? defaultBackgroundScriptTimeout
         // manifest_signing_key is only honoured when MDM-managed (forced). A locally
         // written key could be used to disable script processing without detection,
         // so we ignore it unless it comes from a managed profile. In debug mode a
@@ -176,7 +176,7 @@ func intPreference(_ value: Any?) -> Int? {
 func loadRunOncePlist(bootOnce: Bool = false) -> RunOnce {
 
     if debugMode {
-        showPrefrencePath("Load")
+        showPreferencePath("Load")
     }
 
     let defaults = UserDefaults.standard
@@ -195,7 +195,7 @@ func loadRunOncePlist(bootOnce: Bool = false) -> RunOnce {
 func writeRunOncePlist(runOnceData: RunOnce, bootOnce: Bool = false) {
 
     if debugMode {
-        showPrefrencePath("Stor")
+        showPreferencePath("Stor")
     }
 
     let defaults = UserDefaults.standard
@@ -215,7 +215,7 @@ func writeRunOncePlist(runOnceData: RunOnce, bootOnce: Bool = false) {
     }
 }
 
-func showPrefrencePath(_ action: String) {
+func showPreferencePath(_ action: String) {
     var prefsPath: String
     if isRoot {
         prefsPath = "/Library/Preferences".appending("/\(Bundle.main.bundleIdentifier!).plist")
