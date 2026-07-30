@@ -173,7 +173,7 @@ func intPreference(_ value: Any?) -> Int? {
     }
 }
 
-func loadRunOncePlist(bootOnce: Bool = false) -> RunOnce {
+func loadRunOncePlist(machineScoped: Bool = false) -> RunOnce {
 
     if debugMode {
         showPreferencePath("Load")
@@ -183,7 +183,7 @@ func loadRunOncePlist(bootOnce: Bool = false) -> RunOnce {
     var runOnceKey = "run_once"
 
     if isRoot {
-        if !bootOnce {
+        if !machineScoped {
             runOnceKey += "-"+getConsoleUserInfo().username
         }
         return CFPreferencesCopyValue(runOnceKey as CFString, Bundle.main.bundleIdentifier! as CFString, kCFPreferencesAnyUser, kCFPreferencesAnyHost) as? RunOnce ?? [:]
@@ -192,7 +192,7 @@ func loadRunOncePlist(bootOnce: Bool = false) -> RunOnce {
     }
 }
 
-func writeRunOncePlist(runOnceData: RunOnce, bootOnce: Bool = false) {
+func writeRunOncePlist(runOnceData: RunOnce, machineScoped: Bool = false) {
 
     if debugMode {
         showPreferencePath("Stor")
@@ -202,7 +202,7 @@ func writeRunOncePlist(runOnceData: RunOnce, bootOnce: Bool = false) {
     var runOnceKey = "run_once"
 
     if isRoot {
-        if !bootOnce {
+        if !machineScoped {
             runOnceKey += "-"+getConsoleUserInfo().username
         }
         CFPreferencesSetValue(runOnceKey as CFString,
