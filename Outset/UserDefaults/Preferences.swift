@@ -85,7 +85,7 @@ func loadOutsetPreferences() -> OutsetPreferences {
         outsetPrefs.networkTimeout = intPreference(rootPreferenceValue("network_timeout")) ?? 180
         outsetPrefs.ignoredUsers = rootPreferenceValue("ignored_users") as? [String] ?? []
         outsetPrefs.overrideLoginOnce = rootPreferenceValue("override_login_once") as? RunOnce ?? [:]
-        outsetPrefs.waitForNetwork = boolPreference(rootPreferenceValue("wait_for_network")) ?? false
+        outsetPrefs.waitForNetwork = boolPreference(rootPreferenceValue("wait_for_network"), defaultValue: defaultWaitForNetwork)
         outsetPrefs.backgroundScriptTimeout = intPreference(rootPreferenceValue("background_script_timeout")) ?? defaultBackgroundScriptTimeout
         // manifest_signing_key is only honoured when MDM-managed (forced). A locally
         // written key could be used to disable script processing without detection,
@@ -108,7 +108,7 @@ func loadOutsetPreferences() -> OutsetPreferences {
         outsetPrefs.networkTimeout = intPreference(defaults.object(forKey: "network_timeout")) ?? 180
         outsetPrefs.ignoredUsers = defaults.array(forKey: "ignored_users") as? [String] ?? []
         outsetPrefs.overrideLoginOnce = defaults.object(forKey: "override_login_once") as? RunOnce ?? [:]
-        outsetPrefs.waitForNetwork = boolPreference(defaults.object(forKey: "wait_for_network")) ?? false
+        outsetPrefs.waitForNetwork = boolPreference(defaults.object(forKey: "wait_for_network"), defaultValue: defaultWaitForNetwork)
         if defaults.object(forKey: "background_script_timeout") != nil {
             outsetPrefs.backgroundScriptTimeout = defaults.integer(forKey: "background_script_timeout")
         }
@@ -147,20 +147,11 @@ func nonEmpty(_ string: String?) -> String? {
     return string
 }
 
-/// Reads a preference as a boolean from a bool, a number or a string such as
-/// "true" or "0". Nil when the key is absent or the value is not a boolean.
-func boolPreference(_ value: Any?) -> Bool? {
-    switch value {
-    case let bool as Bool: return bool
-    case let number as NSNumber: return number.boolValue
-    case let string as String:
-        switch string.lowercased().trimmingCharacters(in: .whitespaces) {
-        case "true", "yes", "1": return true
-        case "false", "no", "0": return false
-        default: return nil
-        }
-    default: return nil
-    }
+// Interprets a raw CFPreferences value as a boolean. Key presence alone must
+// never be treated as true: writeOutsetPreferences persists every key on boot,
+// so the key exists on all installations regardless of its value.
+func boolPreference(_ rawValue: Any?, defaultValue: Bool) -> Bool {
+    return rawValue as? Bool ?? defaultValue
 }
 
 /// Reads a preference as an integer from a number or a numeric string.

@@ -47,31 +47,8 @@ struct OutsetPreferencesTests {
     }
 }
 
-@Suite("Preference value parsing")
-struct PreferenceValueParsingTests {
-
-    @Test("A false wait_for_network reads as false, not as present")
-    func falseBoolIsFalse() {
-        #expect(boolPreference(false) == false)
-        #expect(boolPreference(NSNumber(value: false)) == false)
-        #expect(boolPreference(NSNumber(value: 0)) == false)
-        #expect(boolPreference("false") == false)
-        #expect(boolPreference("0") == false)
-    }
-
-    @Test("True values read as true")
-    func trueBoolIsTrue() {
-        #expect(boolPreference(true) == true)
-        #expect(boolPreference(NSNumber(value: 1)) == true)
-        #expect(boolPreference("YES") == true)
-    }
-
-    @Test("A missing or unreadable value has no boolean")
-    func missingBoolIsNil() {
-        #expect(boolPreference(nil) == nil)
-        #expect(boolPreference("maybe") == nil)
-        #expect(boolPreference(["a"]) == nil)
-    }
+@Suite("Integer preference parsing")
+struct IntegerPreferenceParsingTests {
 
     @Test("Integers read from numbers and numeric strings")
     func integers() {
@@ -162,5 +139,39 @@ struct RunOnceScopeTests {
         #expect(PayloadType.loginPrivilegedOnce.machineScoped == false)
         #expect(PayloadType.bootEvery.once == false)
         #expect(PayloadType.bootEvery.machineScoped == true)
+    }
+}
+
+@Suite("Boolean preference interpretation")
+struct BoolPreferenceTests {
+
+    // Regression: loadOutsetPreferences once treated key *presence* as true.
+    // Because writeOutsetPreferences persists every key on boot, that made
+    // wait_for_network effectively always-on, which disabled auto-login on
+    // every installation.
+    @Test("A stored false loads as false even though the key is present")
+    func storedFalseLoadsAsFalse() {
+        #expect(boolPreference(false, defaultValue: false) == false)
+        #expect(boolPreference(false, defaultValue: true) == false)
+        // CFPreferencesCopyValue returns CF types, which bridge to NSNumber
+        #expect(boolPreference(kCFBooleanFalse as Any, defaultValue: true) == false)
+        #expect(boolPreference(NSNumber(value: false), defaultValue: true) == false)
+    }
+
+    @Test("A stored true loads as true")
+    func storedTrueLoadsAsTrue() {
+        #expect(boolPreference(true, defaultValue: false) == true)
+        #expect(boolPreference(kCFBooleanTrue as Any, defaultValue: false) == true)
+    }
+
+    @Test("A missing key falls back to the default")
+    func missingKeyUsesDefault() {
+        #expect(boolPreference(nil, defaultValue: false) == false)
+        #expect(boolPreference(nil, defaultValue: true) == true)
+    }
+
+    @Test("A non-boolean value falls back to the default")
+    func nonBooleanValueUsesDefault() {
+        #expect(boolPreference("true", defaultValue: false) == false)
     }
 }
