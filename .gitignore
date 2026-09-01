@@ -13,3 +13,4 @@ outputs/
 OutsetPkg/
 build_info.txt
 build_info_main.txt
+/.worktrees/

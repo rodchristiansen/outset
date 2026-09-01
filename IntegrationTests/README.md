@@ -89,7 +89,7 @@ Removes all test payload scripts from the outset directories and deletes `/priva
 1. Copy `payloads/login-window.sh` (create one if needed) to `/usr/local/outset/login-window/`.
 2. Restart the Mac.
 3. After reaching the login window (do not log in yet), wait a moment.
-4. Log in, then inspect `/usr/local/outset/logs/outset.log` for `login-window` entries.
+4. Log in, then inspect `/Library/Managed State/logs/outset.log` for `login-window` entries.
 
 ## Marker file format
 

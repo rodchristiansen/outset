@@ -114,6 +114,9 @@ struct Outset: ParsableCommand {
             debugMode = true
         }
 
+        // Rotate the log file on every invocation so the date-change check is not tied to boot
+        performLogRotation(logFolderPath: logDirectory, logFileBaseName: logFileName, maxLogFiles: logFileMaxCount)
+
         let consoleUser = getConsoleUserInfo().username
 
         if version {

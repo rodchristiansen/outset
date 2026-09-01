@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Root log location** (`Globals.swift`, `postinstall`): root-context runs now log to `/Library/Managed State/logs/outset.log` instead of `/usr/local/outset/logs/outset.log`. The directory is created (`0755`) if missing, and the installer moves any existing `outset.log*` history from the previous location. User-context runs continue to log to `~/Library/Logs/outset.log`.
+
+- **Log line format** (`Logging.swift`): log file entries are now written as `[yyyy-MM-dd HH:mm:ss] LEVEL message` in local time, with the level padded to five characters and limited to `DEBUG`, `INFO`, `WARN` and `ERROR` (`default`/`info` map to `INFO`, `fault` maps to `ERROR`). Console and unified log output are unchanged.
+
+- **Log rotation** (`Outset.swift`, `Boot.swift`): the daily rotation check (30 files retained) now runs on every invocation rather than only at boot, and compares the full calendar date rather than the day of month.
+
 ## [4.3.0] - 2026-03-05
 
 ### Fixed

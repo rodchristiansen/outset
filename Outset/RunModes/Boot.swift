@@ -10,7 +10,6 @@ import Foundation
 /// Processes all scheduled tasks that run at system boot.
 ///
 /// This function handles the complete boot-time workflow:
-/// - Rotates the log files to maintain the maximum number of boot logs.
 /// - Ensures required working folders exist.
 /// - Writes the current `OutsetPreferences` to disk.
 /// - Optionally waits for network connectivity before running scripts.
@@ -29,9 +28,6 @@ import Foundation
 ///
 /// - SeeAlso: `processItems(_:)`, `scriptPayloads.processPayloadScripts(ofType:)`
 func processBootTasks(prefs: OutsetPreferences) {
-    // perform log file rotation
-    performLogRotation(logFolderPath: logDirectory, logFileBaseName: logFileName, maxLogFiles: logFileMaxCount)
-
     writeLog("Processing scheduled runs for boot", logLevel: .info)
     ensureWorkingFolders()
 

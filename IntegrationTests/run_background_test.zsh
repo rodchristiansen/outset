@@ -41,7 +41,7 @@ fi
 
 OUTSET_BIN="${1:-/usr/local/outset/Outset.app/Contents/MacOS/Outset}"
 OUTSET_LOGIN_EVERY="/usr/local/outset/login-every"
-LOG_FILE="/usr/local/outset/logs/outset.log"
+LOG_FILE="/Library/Managed State/logs/outset.log"
 PAYLOAD_DIR="${0:A:h}/payloads/background-test"
 
 TEARDOWN=false
