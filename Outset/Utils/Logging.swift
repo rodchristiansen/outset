@@ -34,6 +34,42 @@ func oslogTypeToString(_ type: OSLogType) -> String {
     }
 }
 
+/// Maps an `OSLogType` onto the log file level vocabulary (DEBUG, INFO, WARN, ERROR).
+func logFileLevel(_ type: OSLogType) -> String {
+    switch type {
+    case OSLogType.debug: return "DEBUG"
+    case OSLogType.error, OSLogType.fault: return "ERROR"
+    default: return "INFO"
+    }
+}
+
+/// Formats a log file line as `[yyyy-MM-dd HH:mm:ss] LEVEL message` in local time,
+/// with the level padded to five characters.
+func formatLogFileLine(_ message: String, logLevel: OSLogType, date: Date = Date()) -> String {
+    let dateFormatter = DateFormatter()
+    dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+    dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    let timestamp = dateFormatter.string(from: date)
+    let level = logFileLevel(logLevel).padding(toLength: 5, withPad: " ", startingAt: 0)
+    return "[\(timestamp)] \(level) \(message)"
+}
+
+/// Creates the log directory if it is missing. Returns `false` if it could not be created.
+func ensureLogDirectory() -> Bool {
+    if checkDirectoryExists(path: logDirectory) {
+        return true
+    }
+    do {
+        let attributes = [FileAttributeKey.posixPermissions: 0o755]
+        try FileManager.default.createDirectory(atPath: logDirectory, withIntermediateDirectories: true, attributes: attributes)
+        return true
+    } catch {
+        printStdErr("\(oslogTypeToString(.error).uppercased()): Unable to create log directory at \(logDirectory)")
+        printStdErr(error.localizedDescription)
+        return false
+    }
+}
+
 func printStdErr(_ errorMessage: String) {
     var standardError = StandardError()
     print(errorMessage, to: &standardError)
@@ -67,6 +103,9 @@ func writeFileLog(message: String, logLevel: OSLogType) {
     }
     let logFileURL = URL(fileURLWithPath: logFilePath)
     if !checkFileExists(path: logFilePath) {
+        if !ensureLogDirectory() {
+            return
+        }
         FileManager.default.createFile(atPath: logFileURL.path, contents: nil, attributes: nil)
         let attributes = [FileAttributeKey.posixPermissions: 0o644]
         do {
@@ -81,11 +120,7 @@ func writeFileLog(message: String, logLevel: OSLogType) {
         let fileHandle = try FileHandle(forWritingTo: logFileURL)
         defer { fileHandle.closeFile() }
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-
-        let date = dateFormatter.string(from: Date())
-        let logEntry = "\(date) \(oslogTypeToString(logLevel).uppercased()): \(message)\n"
+        let logEntry = formatLogFileLine(message, logLevel: logLevel) + "\n"
 
         fileHandle.seekToEndOfFile()
         fileHandle.write(logEntry.data(using: .utf8) ?? Data())
@@ -108,15 +143,13 @@ func writeSysReport() {
 
 func performLogRotation(logFolderPath: String, logFileBaseName: String, maxLogFiles: Int = 30) {
     let fileManager = FileManager.default
-    let currentDay = Calendar.current.component(.day, from: Date())
 
-    // Check if the day has changed
+    // Check if the date has changed since the current log file was created
     let newestLogFile = logFolderPath + "/" + logFileBaseName
     if fileManager.fileExists(atPath: newestLogFile) {
         let fileCreationDate = try? fileManager.attributesOfItem(atPath: newestLogFile)[.creationDate] as? Date
         if let creationDate = fileCreationDate {
-            let dayOfCreation = Calendar.current.component(.day, from: creationDate)
-            if dayOfCreation != currentDay {
+            if !Calendar.current.isDate(creationDate, inSameDayAs: Date()) {
                 // rotate files
                 for archivedLogFile in (1...maxLogFiles).reversed() {
                     let sourcePath = logFolderPath + "/" + (archivedLogFile == 1 ? logFileBaseName : "\(logFileBaseName).\(archivedLogFile-1)")

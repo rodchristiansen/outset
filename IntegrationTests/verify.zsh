@@ -6,7 +6,7 @@
 # determine whether each run mode behaved correctly.
 #
 # Can be run as any user (reads /private/tmp/outset-test-results and the
-# outset log at /usr/local/outset/logs/outset.log).
+# outset log at /Library/Managed State/logs/outset.log).
 #
 # Exit codes:
 #   0 — all checks passed
@@ -14,7 +14,7 @@
 # =============================================================================
 
 RESULTS_DIR="/private/tmp/outset-test-results"
-LOG_FILE="/usr/local/outset/logs/outset.log"
+LOG_FILE="/Library/Managed State/logs/outset.log"
 
 # ── Colour helpers ─────────────────────────────────────────────────────────────
 # Use tput if a terminal is attached; fall back to plain text otherwise.
