@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **One log for both contexts** (`Globals.swift`, `Logging.swift`, `postinstall`): `/Library/Managed State/logs` is now created root:wheel mode `1777` (world-writable, sticky) by the installer and by root-context runs, and any context that can write there logs there, so login-time user scripts land in the same `outset.log` as boot scripts. The log file is created mode `0666`, opened with `O_NOFOLLOW`, must be a single-linked regular file, and is rotated only by its owner or root. `~/Library/Logs/outset.log` remains the fallback when the shared directory is absent or not writable.
+
 - **Root log location** (`Globals.swift`, `postinstall`): root-context runs now log to `/Library/Managed State/logs/outset.log` instead of `/usr/local/outset/logs/outset.log`. The directory is created (`0755`) if missing, and the installer moves any existing `outset.log*` history from the previous location. User-context runs continue to log to `~/Library/Logs/outset.log`.
 
 - **Log line format** (`Logging.swift`): log file entries are now written as `[yyyy-MM-dd HH:mm:ss] LEVEL message` in local time, with the level padded to five characters and limited to `DEBUG`, `INFO`, `WARN` and `ERROR` (`default`/`info` map to `INFO`, `fault` maps to `ERROR`). Console and unified log output are unchanged.

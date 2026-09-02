@@ -28,17 +28,25 @@ let osLog = OSLog(subsystem: bundleID, category: "main")
 // We could make these availab as preferences perhaps
 let logFileName = "outset.log"
 let logFileMaxCount: Int = 30
-// Root context writes to the managed log directory; user context writes to ~/Library/Logs
-// so that user-launched Outset agents can always write their log file.
+// The managed log directory is shared by root and user contexts. The installer
+// creates it root:wheel mode 1777 (world-writable, sticky), and a root-context
+// run creates it that way if it is missing. Any context that can write there
+// logs there; when the directory is absent or not writable, or the file cannot
+// be opened, the log falls back to ~/Library/Logs so user agents always have a
+// place to write.
 let managedLogDirectory = "/Library/Managed State/logs"
+let managedLogDirectoryMode: mode_t = 0o1777
+let managedLogFileMode: mode_t = 0o666
+var userLogDirectory: String {
+    return FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs")
+        .path
+}
 var logDirectory: String {
-    if getuid() == 0 {
+    if managedLogDirectoryIsWritable() {
         return managedLogDirectory
-    } else {
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs")
-            .path
     }
+    return userLogDirectory
 }
 var logFilePath: String {
     return logDirectory + "/" + logFileName

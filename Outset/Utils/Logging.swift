@@ -54,20 +54,95 @@ func formatLogFileLine(_ message: String, logLevel: OSLogType, date: Date = Date
     return "[\(timestamp)] \(level) \(message)"
 }
 
-/// Creates the log directory if it is missing. Returns `false` if it could not be created.
-func ensureLogDirectory() -> Bool {
-    if checkDirectoryExists(path: logDirectory) {
+/// Creates the managed log directory root:wheel mode 1777 when it is missing and
+/// restores that mode if it drifted. Root only; a no-op in user context.
+func ensureManagedLogDirectory() {
+    guard getuid() == 0 else { return }
+    var info = stat()
+    if stat(managedLogDirectory, &info) == 0 {
+        if (info.st_mode & S_IFMT) == S_IFDIR, (info.st_mode & 0o7777) != managedLogDirectoryMode {
+            chmod(managedLogDirectory, managedLogDirectoryMode)
+        }
+        return
+    }
+    let parent = (managedLogDirectory as NSString).deletingLastPathComponent
+    try? FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true,
+                                             attributes: [FileAttributeKey.posixPermissions: 0o755])
+    if mkdir(managedLogDirectory, managedLogDirectoryMode) == 0 {
+        chown(managedLogDirectory, 0, 0)
+        chmod(managedLogDirectory, managedLogDirectoryMode)
+    }
+}
+
+/// True when the managed log directory exists (root creates it first) and this
+/// process may create files in it.
+func managedLogDirectoryIsWritable() -> Bool {
+    ensureManagedLogDirectory()
+    var info = stat()
+    guard stat(managedLogDirectory, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR else { return false }
+    return access(managedLogDirectory, W_OK | X_OK) == 0
+}
+
+/// Creates the directory holding `path` if it is missing. Returns `false` if it could not be created.
+func ensureLogDirectory(for path: String = logFilePath) -> Bool {
+    let directory = (path as NSString).deletingLastPathComponent
+    if directory == managedLogDirectory {
+        ensureManagedLogDirectory()
+        return checkDirectoryExists(path: directory)
+    }
+    if checkDirectoryExists(path: directory) {
         return true
     }
     do {
         let attributes = [FileAttributeKey.posixPermissions: 0o755]
-        try FileManager.default.createDirectory(atPath: logDirectory, withIntermediateDirectories: true, attributes: attributes)
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: attributes)
         return true
     } catch {
-        printStdErr("\(oslogTypeToString(.error).uppercased()): Unable to create log directory at \(logDirectory)")
+        printStdErr("\(oslogTypeToString(.error).uppercased()): Unable to create log directory at \(directory)")
         printStdErr(error.localizedDescription)
         return false
     }
+}
+
+/// Opens `path` for appending without following a symlink, refuses anything that
+/// is not a regular file with one link, and widens a file this process owns to
+/// mode 0666 so the other context can append too. Returns `nil` on failure.
+func openLogFile(_ path: String) -> Int32? {
+    let descriptor = open(path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW, managedLogFileMode)
+    guard descriptor >= 0 else { return nil }
+    var info = stat()
+    guard fstat(descriptor, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_nlink == 1 else {
+        close(descriptor)
+        return nil
+    }
+    if info.st_uid == geteuid(), (info.st_mode & 0o777) != managedLogFileMode {
+        fchmod(descriptor, managedLogFileMode)
+    }
+    return descriptor
+}
+
+/// Appends `data` to the log file at `path`. Returns `false` when the file could not be written.
+func appendToLogFile(_ data: Data, at path: String) -> Bool {
+    guard ensureLogDirectory(for: path), let descriptor = openLogFile(path) else { return false }
+    defer { close(descriptor) }
+    var ok = true
+    data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) in
+        guard let base = buffer.baseAddress else { return }
+        var offset = 0
+        while offset < buffer.count {
+            let written = Darwin.write(descriptor, base + offset, buffer.count - offset)
+            if written <= 0 { ok = false; break }
+            offset += written
+        }
+    }
+    return ok
+}
+
+/// True when this process may rename `path`: it is root, or it owns the file.
+func canRotateLogFile(_ path: String) -> Bool {
+    var info = stat()
+    guard stat(path, &info) == 0 else { return false }
+    return getuid() == 0 || info.st_uid == geteuid()
 }
 
 func printStdErr(_ errorMessage: String) {
@@ -101,34 +176,17 @@ func writeFileLog(message: String, logLevel: OSLogType) {
     if logLevel == .debug && !debugMode {
         return
     }
-    let logFileURL = URL(fileURLWithPath: logFilePath)
-    if !checkFileExists(path: logFilePath) {
-        if !ensureLogDirectory() {
-            return
-        }
-        FileManager.default.createFile(atPath: logFileURL.path, contents: nil, attributes: nil)
-        let attributes = [FileAttributeKey.posixPermissions: 0o644]
-        do {
-            try FileManager.default.setAttributes(attributes, ofItemAtPath: logFileURL.path)
-        } catch {
-            printStdErr("\(oslogTypeToString(.error).uppercased()): Unable to create log file at \(logFilePath)")
-            printStdErr(error.localizedDescription)
-            return
-        }
-    }
-    do {
-        let fileHandle = try FileHandle(forWritingTo: logFileURL)
-        defer { fileHandle.closeFile() }
-
-        let logEntry = formatLogFileLine(message, logLevel: logLevel) + "\n"
-
-        fileHandle.seekToEndOfFile()
-        fileHandle.write(logEntry.data(using: .utf8) ?? Data())
-    } catch {
-        printStdErr("\(oslogTypeToString(.error).uppercased()): Unable to read log file at \(logFilePath)")
-        printStdErr(error.localizedDescription)
+    let logEntry = formatLogFileLine(message, logLevel: logLevel) + "\n"
+    guard let data = logEntry.data(using: .utf8) else { return }
+    let preferred = logFilePath
+    if appendToLogFile(data, at: preferred) {
         return
     }
+    let fallback = userLogDirectory + "/" + logFileName
+    if fallback != preferred, appendToLogFile(data, at: fallback) {
+        return
+    }
+    printStdErr("\(oslogTypeToString(.error).uppercased()): Unable to write log file at \(preferred)")
 }
 
 func writeSysReport() {
@@ -146,7 +204,9 @@ func performLogRotation(logFolderPath: String, logFileBaseName: String, maxLogFi
 
     // Check if the date has changed since the current log file was created
     let newestLogFile = logFolderPath + "/" + logFileBaseName
-    if fileManager.fileExists(atPath: newestLogFile) {
+    // In the shared sticky directory only the owner (or root) may rename the file;
+    // another context keeps appending to the current file instead.
+    if fileManager.fileExists(atPath: newestLogFile), canRotateLogFile(newestLogFile) {
         let fileCreationDate = try? fileManager.attributesOfItem(atPath: newestLogFile)[.creationDate] as? Date
         if let creationDate = fileCreationDate {
             if !Calendar.current.isDate(creationDate, inSameDayAs: Date()) {

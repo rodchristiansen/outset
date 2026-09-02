@@ -16,13 +16,15 @@ APP_ROOT="${APP_PATH}/Contents"
 # register the app bundle
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister "${APP_PATH}"
 
+# the managed log directory is shared by root and user contexts: world-writable
+# with the sticky bit, and any log already there is widened so both can append
+MANAGED_LOG_DIR="/Library/Managed State/logs"
+/usr/bin/install -d -m 1777 -o root -g wheel "${MANAGED_LOG_DIR}"
+/bin/chmod 1777 "${MANAGED_LOG_DIR}"
+
 # move any existing log history from the previous log location into the managed log directory
 LEGACY_LOG_DIR="/usr/local/outset/logs"
-MANAGED_LOG_DIR="/Library/Managed State/logs"
 if [ -d "${LEGACY_LOG_DIR}" ]; then
-    /bin/mkdir -p "${MANAGED_LOG_DIR}"
-    /usr/sbin/chown root:wheel "${MANAGED_LOG_DIR}"
-    /bin/chmod 755 "${MANAGED_LOG_DIR}"
     for logfile in "${LEGACY_LOG_DIR}"/outset.log*(N); do
         if [ ! -e "${MANAGED_LOG_DIR}/${logfile:t}" ]; then
             /bin/mv "${logfile}" "${MANAGED_LOG_DIR}/"
@@ -30,6 +32,7 @@ if [ -d "${LEGACY_LOG_DIR}" ]; then
     done
     /bin/rmdir "${LEGACY_LOG_DIR}" 2>/dev/null
 fi
+/bin/chmod 666 "${MANAGED_LOG_DIR}"/outset.log*(N) 2>/dev/null
 
 # run boot argument - creates necessary paths and folders
 "${APP_PATH}/Contents/MacOS/Outset" --boot
