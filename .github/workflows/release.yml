@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version from tag
+        id: ver
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Outset.app (unsigned)
+        run: |
+          xcodebuild -project Outset.xcodeproj -scheme "Outset App Bundle" -configuration Release \
+            -derivedDataPath ./build \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            clean build
+
+      - name: Build unsigned package
+        env:
+          VERSION: ${{ steps.ver.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          payload="$PWD/pkg/payload"
+          rm -rf "$PWD/pkg" artifacts && mkdir -p "$payload" artifacts
+          cp -R build/Build/Products/Release/Outset.app "$payload/Outset.app"
+          cp Package/outset "$payload/outset"
+          chmod a+x "$payload/outset"
+          pkgbuild --root "$payload" --scripts Package/Scripts --identifier io.macadmins.Outset \
+            --version "$VERSION" --install-location /usr/local/outset "artifacts/Outset-component.pkg"
+          productbuild --package "artifacts/Outset-component.pkg" --identifier io.macadmins.Outset \
+            --version "$VERSION" "artifacts/Outset-${VERSION}.pkg"
+          rm -f artifacts/Outset-component.pkg
+          shasum -a 256 "artifacts/Outset-${VERSION}.pkg" > "artifacts/Outset-${VERSION}.pkg.sha256"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Outset ${{ steps.ver.outputs.VERSION }}
+          body: Unsigned package built from this tag. Sign and notarize it with your own Developer ID before deployment.
+          files: |
+            artifacts/Outset-${{ steps.ver.outputs.VERSION }}.pkg
+            artifacts/Outset-${{ steps.ver.outputs.VERSION }}.pkg.sha256
