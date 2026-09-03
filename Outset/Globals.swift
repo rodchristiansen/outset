@@ -27,7 +27,6 @@ let bundleID = Bundle.main.bundleIdentifier ?? "io.macadmins.Outset"
 let osLog = OSLog(subsystem: bundleID, category: "main")
 // We could make these availab as preferences perhaps
 let logFileName = "outset.log"
-let logFileMaxCount: Int = 30
 // The managed log directory is shared by root and user contexts. The installer
 // creates it root:wheel mode 1777 (world-writable, sticky), and a root-context
 // run creates it that way if it is missing. Any context that can write there
@@ -48,7 +47,13 @@ var logDirectory: String {
     }
     return userLogDirectory
 }
+/// The file this run's lines go to: its session directory's outset.log when the
+/// run has a session, otherwise the flat log at the root, as builds before the
+/// session layout wrote.
 var logFilePath: String {
+    if let session = currentSession {
+        return session.logFilePath
+    }
     return logDirectory + "/" + logFileName
 }
 

@@ -108,14 +108,33 @@ struct Outset: ParsableCommand {
     @Option(help: ArgumentHelp("Base64-encoded Ed25519 public key for use with --verify-script", valueName: "key"))
     var publicKey: String = ""
 
+    /// What launchd (or a person) invoked this run for, recorded in session.json
+    /// so a reader can tell a boot run from a login one without reading the log.
+    var runType: String {
+        if boot { return "boot" }
+        if login || loginEvery || loginOnce { return "login" }
+        if loginWindow { return "loginwindow" }
+        if loginPrivileged { return "login-privileged" }
+        if onDemand || onDemandPrivileged { return "on-demand" }
+        if cleanup { return "cleanup" }
+        return "cli"
+    }
+
     mutating func run() throws {
 
         if debug || UserDefaults.standard.bool(forKey: "verbose_logging") {
             debugMode = true
         }
 
-        // Rotate the log file on every invocation so the date-change check is not tied to boot
-        performLogRotation(logFolderPath: logDirectory, logFileBaseName: logFileName, maxLogFiles: logFileMaxCount)
+        // Retention first, then this run's session directory: logs/YYYY-MM-DD/HHMMSS/,
+        // holding outset.log beside events.jsonl and session.json.
+        OutsetSession.prune(logsDirectory: logDirectory)
+        currentSession = OutsetSession(
+            logsDirectory: logDirectory,
+            version: "\(outsetVersion)",
+            runType: runType
+        )
+        atexit(finishOutsetSession)
 
         let consoleUser = getConsoleUserInfo().username
 

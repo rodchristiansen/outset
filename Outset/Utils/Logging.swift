@@ -176,10 +176,13 @@ func writeFileLog(message: String, logLevel: OSLogType) {
     if logLevel == .debug && !debugMode {
         return
     }
-    let logEntry = formatLogFileLine(message, logLevel: logLevel) + "\n"
+    let now = Date()
+    let logEntry = formatLogFileLine(message, logLevel: logLevel, date: now) + "\n"
     guard let data = logEntry.data(using: .utf8) else { return }
     let preferred = logFilePath
     if appendToLogFile(data, at: preferred) {
+        // The same record, structured, in the session's events.jsonl.
+        currentSession?.append(level: logFileLevel(logLevel), message: message, date: now)
         return
     }
     let fallback = userLogDirectory + "/" + logFileName
@@ -197,36 +200,4 @@ func writeSysReport() {
     writeLog("Serial: \(deviceSerialNumber)", logLevel: .debug)
     writeLog("OS: \(osVersion)", logLevel: .debug)
     writeLog("Build: \(osBuildVersion)", logLevel: .debug)
-}
-
-func performLogRotation(logFolderPath: String, logFileBaseName: String, maxLogFiles: Int = 30) {
-    let fileManager = FileManager.default
-
-    // Check if the date has changed since the current log file was created
-    let newestLogFile = logFolderPath + "/" + logFileBaseName
-    // In the shared sticky directory only the owner (or root) may rename the file;
-    // another context keeps appending to the current file instead.
-    if fileManager.fileExists(atPath: newestLogFile), canRotateLogFile(newestLogFile) {
-        let fileCreationDate = try? fileManager.attributesOfItem(atPath: newestLogFile)[.creationDate] as? Date
-        if let creationDate = fileCreationDate {
-            if !Calendar.current.isDate(creationDate, inSameDayAs: Date()) {
-                // rotate files
-                for archivedLogFile in (1...maxLogFiles).reversed() {
-                    let sourcePath = logFolderPath + "/" + (archivedLogFile == 1 ? logFileBaseName : "\(logFileBaseName).\(archivedLogFile-1)")
-                    let destinationPath = logFolderPath + "/" + "\(logFileBaseName).\(archivedLogFile)"
-
-                    if fileManager.fileExists(atPath: sourcePath) {
-                        if archivedLogFile == maxLogFiles {
-                            // Delete the oldest log file if it exists
-                            try? fileManager.removeItem(atPath: sourcePath)
-                        } else {
-                            // Move the log file to the next number in the rotation
-                            try? fileManager.moveItem(atPath: sourcePath, toPath: destinationPath)
-                        }
-                    }
-                }
-                writeLog("Logrotate complete", logLevel: .debug)
-            }
-        }
-    }
 }
