@@ -222,15 +222,9 @@
 //
 // writeLog(_:logLevel:log:) / writeFileLog(message:logLevel:)
 //   SIDE_EFFECTS_ONLY
-//   Writes to os_log and to a log file at a hardcoded path. The log file path
-//   is /Library/Managed State/logs/outset.log which requires root to write to in a
-//   production environment.
-//
-// performLogRotation(logFolderPath:logFileBaseName:maxLogFiles:)
-//   SIDE_EFFECTS_ONLY, REQUIRES_ROOT (for production path)
-//   Could be tested with a temp directory but the observable outcome is only
-//   file existence/absence, providing limited signal over what folderContents
-//   tests already cover.
+//   Writes to os_log and to a log file at a hardcoded path. The log file is
+//   /Library/Managed State/logs/<day>/<time>/outset.log, which requires root to
+//   write to in a production environment.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //

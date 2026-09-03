@@ -14,6 +14,7 @@
 		34564327C1085EEA0F7882EC /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41765AC929C97B6400D616BF /* Services.swift */; };
 		35BDD84254474EA884751B79 /* Checksum.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC3DC8292AA70E380050EE16 /* Checksum.swift */; };
 		3912368B708074891995ACC5 /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC3DC8212AA70B2D0050EE16 /* Logging.swift */; };
+		CC5E10032BA10B2D0050EE16 /* SessionLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC5E10012BA10B2D0050EE16 /* SessionLog.swift */; };
 		3920F3CAA3DE7B309A545BC6 /* DMG.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC7DDB992C2C1CAC000CBEC5 /* DMG.swift */; };
 		3E56CF89F9029AF1F378DE7F /* OnDemand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52661F37B03F3DD26C429929 /* OnDemand.swift */; };
 		4124EFB429414A5E003B00F4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4124EFB329414A5E003B00F4 /* Assets.xcassets */; };
@@ -47,6 +48,7 @@
 		C23E661D025757D322651B7A /* Login.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEEAC27BA0BE6AF0B022609 /* Login.swift */; };
 		CB0E5D059F2808366601DA17 /* ItemProcessing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4124EFA4293B304B003B00F4 /* ItemProcessing.swift */; };
 		CC3DC8222AA70B2D0050EE16 /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC3DC8212AA70B2D0050EE16 /* Logging.swift */; };
+		CC5E10022BA10B2D0050EE16 /* SessionLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC5E10012BA10B2D0050EE16 /* SessionLog.swift */; };
 		CC3DC8242AA70BD40050EE16 /* Preferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC3DC8232AA70BD40050EE16 /* Preferences.swift */; };
 		CC3DC8262AA70D2D0050EE16 /* Network.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC3DC8252AA70D2D0050EE16 /* Network.swift */; };
 		CC3DC8282AA70D930050EE16 /* SystemInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC3DC8272AA70D930050EE16 /* SystemInfo.swift */; };
@@ -144,6 +146,7 @@
 		B4FAC66593AC5EDAE9B60EDC /* ChecksumTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChecksumTests.swift; sourceTree = "<group>"; };
 		C329D81F86E5C3D1B8F12B27 /* PreferencesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PreferencesTests.swift; sourceTree = "<group>"; };
 		CC3DC8212AA70B2D0050EE16 /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
+		CC5E10012BA10B2D0050EE16 /* SessionLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionLog.swift; sourceTree = "<group>"; };
 		CC3DC8232AA70BD40050EE16 /* Preferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preferences.swift; sourceTree = "<group>"; };
 		CC3DC8252AA70D2D0050EE16 /* Network.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Network.swift; sourceTree = "<group>"; };
 		CC3DC8272AA70D930050EE16 /* SystemInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemInfo.swift; sourceTree = "<group>"; };
@@ -225,6 +228,7 @@
 				4124EF99293824C8003B00F4 /* SystemUtils.swift */,
 				41765AC929C97B6400D616BF /* Services.swift */,
 				CC3DC8212AA70B2D0050EE16 /* Logging.swift */,
+				CC5E10012BA10B2D0050EE16 /* SessionLog.swift */,
 				CC3DC8252AA70D2D0050EE16 /* Network.swift */,
 				CC3DC8272AA70D930050EE16 /* SystemInfo.swift */,
 			);
@@ -529,6 +533,7 @@
 				CC3DC82F2AA70F230050EE16 /* URL+additions.swift in Sources */,
 				CC3DC8262AA70D2D0050EE16 /* Network.swift in Sources */,
 				CC3DC8222AA70B2D0050EE16 /* Logging.swift in Sources */,
+				CC5E10022BA10B2D0050EE16 /* SessionLog.swift in Sources */,
 				41E28EA329ACDCE3002ADBE5 /* CoreFileUtils.swift in Sources */,
 				CC3DC82D2AA70EE60050EE16 /* Data+additions.swift in Sources */,
 				CC7DDB972C2C18E8000CBEC5 /* Globals.swift in Sources */,
@@ -566,6 +571,7 @@
 				DEFFC0DCA57562EF554D7E1E /* URL+additions.swift in Sources */,
 				F9AF15749640CC6FF18920A8 /* Network.swift in Sources */,
 				3912368B708074891995ACC5 /* Logging.swift in Sources */,
+				CC5E10032BA10B2D0050EE16 /* SessionLog.swift in Sources */,
 				A5B45D172A76AD3F1E682B2A /* CoreFileUtils.swift in Sources */,
 				B2FB3923BB208F277DEBBBC2 /* Data+additions.swift in Sources */,
 				844876F27C4F9A95BC89FAAD /* Globals.swift in Sources */,
