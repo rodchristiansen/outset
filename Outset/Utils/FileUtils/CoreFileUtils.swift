@@ -104,24 +104,44 @@ func verifyPermissions(pathname: String, trustedOwners: Set<uid_t> = [0]) -> Boo
 }
 
 func verifyParentChain(of pathname: String, trustedOwners: Set<uid_t> = [0]) -> Bool {
-    // Walks from the item's real parent directory up to /, requiring each one to be a
-    // directory owned by a trusted owner and not writable by group or other.
+    // outset runs the item by the path it was given, so the folders on that path are
+    // checked as written, and again after resolving symlinks. A symlinked folder on the
+    // path is accepted only when the folder holding it is root-only, which is what stops
+    // the link being replaced; the folders it resolves to must pass on their own.
     let parent = (pathname as NSString).deletingLastPathComponent
+    guard parent.hasPrefix("/") else {
+        writeLog("\(pathname) is not an absolute path", logLevel: .error)
+        return false
+    }
     guard let resolved = realpath(parent, nil) else {
         writeLog("Could not resolve the folder holding \(pathname)", logLevel: .error)
         return false
     }
-    var directory = String(cString: resolved)
+    let resolvedParent = String(cString: resolved)
     free(resolved)
 
+    return verifyFolders(from: parent, item: pathname, allowLinks: true, trustedOwners: trustedOwners)
+        && verifyFolders(from: resolvedParent, item: pathname, allowLinks: false, trustedOwners: trustedOwners)
+}
+
+private func verifyFolders(from start: String, item: String, allowLinks: Bool, trustedOwners: Set<uid_t>) -> Bool {
+    // Walks from start up to /, requiring each entry to be owned by a trusted owner and,
+    // for folders, not writable by group or other.
+    var directory = start
     while true {
         var info = stat()
-        guard lstat(directory, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else {
-            writeLog("Could not read folder \(directory) above \(pathname)", logLevel: .error)
+        guard lstat(directory, &info) == 0 else {
+            writeLog("Could not read folder \(directory) above \(item)", logLevel: .error)
             return false
         }
-        guard trustedOwners.contains(info.st_uid), info.st_mode & (S_IWGRP | S_IWOTH) == 0 else {
-            writeLog("Folder \(directory) above \(pathname) must be owned by root and writable only by root. Skipping", logLevel: .error)
+        let type = info.st_mode & S_IFMT
+        let isLink = type == S_IFLNK
+        guard type == S_IFDIR || (allowLinks && isLink) else {
+            writeLog("\(directory) above \(item) is not a folder. Skipping", logLevel: .error)
+            return false
+        }
+        guard trustedOwners.contains(info.st_uid), isLink || info.st_mode & (S_IWGRP | S_IWOTH) == 0 else {
+            writeLog("Folder \(directory) above \(item) must be owned by root and writable only by root. Skipping", logLevel: .error)
             return false
         }
         if directory == "/" { return true }

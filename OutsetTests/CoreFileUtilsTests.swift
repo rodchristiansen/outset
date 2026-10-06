@@ -208,3 +208,47 @@ struct VerifyPermissionsTests {
         #expect(verifyPermissions(pathname: executablePkg.path, trustedOwners: owners) == false)
     }
 }
+
+@Suite("verifyParentChain")
+struct VerifyParentChainTests {
+
+    let owners: Set<uid_t> = [0, getuid()]
+
+    @Test("Rejects a symlinked folder that sits in a writable folder")
+    func rejectsLinkInWritableFolder() throws {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let real = base.appendingPathComponent("real")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: false)
+        let open = base.appendingPathComponent("open")
+        try FileManager.default.createDirectory(at: open, withIntermediateDirectories: false,
+                                                attributes: [.posixPermissions: 0o777])
+        let link = open.appendingPathComponent("scripts")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        let script = real.appendingPathComponent("run.sh")
+        FileManager.default.createFile(atPath: script.path, contents: Data("#!/bin/sh\n".utf8),
+                                       attributes: [.posixPermissions: 0o755])
+
+        #expect(verifyPermissions(pathname: script.path, trustedOwners: owners) == true)
+        #expect(verifyPermissions(pathname: link.appendingPathComponent("run.sh").path, trustedOwners: owners) == false)
+    }
+
+    @Test("Accepts a symlinked folder that sits in a root-only folder")
+    func acceptsLinkInLockedFolder() throws {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let real = base.appendingPathComponent("real")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: false)
+        let link = base.appendingPathComponent("scripts")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        FileManager.default.createFile(atPath: real.appendingPathComponent("run.sh").path,
+                                       contents: Data("#!/bin/sh\n".utf8),
+                                       attributes: [.posixPermissions: 0o755])
+
+        #expect(verifyPermissions(pathname: link.appendingPathComponent("run.sh").path, trustedOwners: owners) == true)
+    }
+}
