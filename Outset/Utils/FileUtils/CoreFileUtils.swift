@@ -69,52 +69,64 @@ func getFolderContents(path: String) -> [String] {
     return filelist
 }
 
-func verifyPermissions(pathname: String) -> Bool {
-    // Files should be owned by root
-    // Files that are not scripts should have permissions 644 (-rw-r--r--)
-    // Files that are scripts should have permissions 755 (-rwxr-xr-x)
-    // If the permission for the request file is not correct then return fals to indicate it should not be processed
+func verifyPermissions(pathname: String, trustedOwners: Set<uid_t> = [0]) -> Bool {
+    // An item runs only when no account other than root could have changed it:
+    // - it is a regular file, never a symlink, so a root-owned link cannot point elsewhere
+    // - it is owned by root, mode 644 for packages and profiles, 755 for scripts
+    // - every directory above it is root-owned and writable by no group or other,
+    //   so the file cannot be swapped between this check and the run
+    // trustedOwners exists for tests; outset itself always trusts root only.
 
-    let (ownerID, mode) = getFileProperties(pathname: pathname)
-    let posixPermissions = String(mode.intValue, radix: 8, uppercase: false)
-    let errorMessage = "Permissions for \(pathname) are incorrect. Should be owned by root and with mode"
-
-    writeLog("ownerID for \(pathname) : \(String(describing: ownerID))", logLevel: .debug)
-    writeLog("posixPermissions for \(pathname) : \(String(describing: posixPermissions))", logLevel: .debug)
-
-    if ["pkg", "mpkg", "dmg", "mobileconfig"].contains(pathname.lowercased().split(separator: ".").last) {
-        if ownerID == 0 && mode == FilePermissions.file.asNSNumber {
-            return true
-        } else {
-            writeLog("\(errorMessage) x644", logLevel: .error)
-        }
-    } else {
-        if ownerID == 0 && mode == FilePermissions.executable.asNSNumber {
-            return true
-        } else {
-            writeLog("\(errorMessage) x755", logLevel: .error)
-        }
+    var info = stat()
+    guard lstat(pathname, &info) == 0 else {
+        writeLog("Could not read file at path \(pathname)", logLevel: .error)
+        return false
     }
-    return false
+
+    guard info.st_mode & S_IFMT == S_IFREG else {
+        writeLog("\(pathname) is not a regular file. Symlinks and folders are not run", logLevel: .error)
+        return false
+    }
+
+    let isPackage = ["pkg", "mpkg", "dmg", "mobileconfig"].contains(pathname.lowercased().split(separator: ".").last)
+    let required = isPackage ? FilePermissions.file : FilePermissions.executable
+    let mode = info.st_mode & 0o7777
+
+    writeLog("ownerID for \(pathname) : \(info.st_uid)", logLevel: .debug)
+    writeLog("posixPermissions for \(pathname) : \(String(mode, radix: 8))", logLevel: .debug)
+
+    guard trustedOwners.contains(info.st_uid), mode == required.rawValue.uint16Value else {
+        writeLog("Permissions for \(pathname) are incorrect. Should be owned by root and with mode x\(String(required.rawValue.intValue, radix: 8))", logLevel: .error)
+        return false
+    }
+
+    return verifyParentChain(of: pathname, trustedOwners: trustedOwners)
 }
 
-func getFileProperties(pathname: String) -> (ownerID: Int, permissions: NSNumber) {
-    // returns the ID and permissions of the specified file
-    var fileAttributes: [FileAttributeKey: Any]
-    var ownerID: Int = 0
-    var mode: NSNumber = 0
-    do {
-        fileAttributes = try FileManager.default.attributesOfItem(atPath: pathname)
-        if let ownerProperty = fileAttributes[.ownerAccountID] as? Int {
-            ownerID = ownerProperty
-        }
-        if let modeProperty = fileAttributes[.posixPermissions] as? NSNumber {
-            mode = modeProperty
-        }
-    } catch {
-        writeLog("Could not read file at path \(pathname)", logLevel: .error)
+func verifyParentChain(of pathname: String, trustedOwners: Set<uid_t> = [0]) -> Bool {
+    // Walks from the item's real parent directory up to /, requiring each one to be a
+    // directory owned by a trusted owner and not writable by group or other.
+    let parent = (pathname as NSString).deletingLastPathComponent
+    guard let resolved = realpath(parent, nil) else {
+        writeLog("Could not resolve the folder holding \(pathname)", logLevel: .error)
+        return false
     }
-    return (ownerID, mode)
+    var directory = String(cString: resolved)
+    free(resolved)
+
+    while true {
+        var info = stat()
+        guard lstat(directory, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else {
+            writeLog("Could not read folder \(directory) above \(pathname)", logLevel: .error)
+            return false
+        }
+        guard trustedOwners.contains(info.st_uid), info.st_mode & (S_IWGRP | S_IWOTH) == 0 else {
+            writeLog("Folder \(directory) above \(pathname) must be owned by root and writable only by root. Skipping", logLevel: .error)
+            return false
+        }
+        if directory == "/" { return true }
+        directory = (directory as NSString).deletingLastPathComponent
+    }
 }
 
 func pathCleanup(_ pathname: String) {
