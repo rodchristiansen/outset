@@ -238,18 +238,23 @@ final class OutsetSession {
 
     /// Creates a day directory inside the shared log root world-writable and
     /// sticky, the way the root itself is, so a run in either context can place
-    /// its own session directory in it. Returns true when the directory exists
-    /// and this process may create entries in it.
+    /// its own session directory in it. Returns true when the directory exists,
+    /// is trusted, and this process may create entries in it.
+    ///
+    /// Any account can create entries in the log root, so an existing entry is
+    /// read with lstat and never followed, and its mode is never changed: only a
+    /// directory this process just created gets chmod. An existing directory is
+    /// trusted only when owned by root or by this process; a root run that finds
+    /// one owned by someone else stays on the flat log.
     static func makeSharedDirectory(_ path: String) -> Bool {
         var info = stat()
-        if stat(path, &info) == 0 {
+        if lstat(path, &info) == 0 {
             guard (info.st_mode & S_IFMT) == S_IFDIR else { return false }
-            if (info.st_mode & 0o7777) != managedLogDirectoryMode, info.st_uid == geteuid() {
-                chmod(path, managedLogDirectoryMode)
-            }
+            guard info.st_uid == 0 || info.st_uid == geteuid() else { return false }
             return access(path, W_OK | X_OK) == 0
         }
         guard mkdir(path, managedLogDirectoryMode) == 0 else { return false }
+        // The sticky log root stops other accounts renaming what this process just made.
         chmod(path, managedLogDirectoryMode)
         return access(path, W_OK | X_OK) == 0
     }
