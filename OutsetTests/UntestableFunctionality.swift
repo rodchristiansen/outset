@@ -147,17 +147,8 @@
 //
 // PERMISSIONS
 //
-// verifyPermissions(pathname:)
-//   REQUIRES_ROOT
-//   Checks that files are owned by root (uid 0). Any file created by a test
-//   process is owned by the test user, so the check will always fail and the
-//   function will always return false. Cannot be meaningfully tested without
-//   a root-owned file fixture.
-//
-// getFileProperties(pathname:)
-//   REQUIRES_ROOT (for useful values)
-//   Can be called on any file, but the ownerID will never be 0 in a test
-//   environment so only error paths are reachable.
+// verifyPermissions(pathname:) is covered in CoreFileUtilsTests.swift by passing
+// the test user as a trusted owner; the root-only default is not exercised.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //
