@@ -101,7 +101,9 @@ struct OutsetSessionTests {
         try FileManager.default.createSymbolicLink(atPath: logs + "/2026-09-03", withDestinationPath: target)
         let start = OutsetSession.formatter("yyyy-MM-dd HH:mm:ss").date(from: "2026-09-03 04:11:07")!
 
-        #expect(OutsetSession(logsDirectory: logs, version: "v", runType: "boot", start: start) == nil)
+        // Root sets the entry aside and makes its own day; any other account stays off it.
+        let session = OutsetSession(logsDirectory: logs, version: "v", runType: "boot", start: start)
+        #expect((session != nil) == (geteuid() == 0))
         var info = stat()
         #expect(stat(target, &info) == 0)
         #expect(info.st_mode & 0o7777 == 0o755)
@@ -120,6 +122,54 @@ struct OutsetSessionTests {
         var info = stat()
         #expect(lstat(day, &info) == 0)
         #expect(info.st_mode & 0o7777 == 0o755)
+    }
+
+    @Test("A set-aside name carries the time it was set aside")
+    func untrustedNameRoundTrips() {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let name = OutsetSession.untrustedName(day: "2026-09-03", pid: 42, now: now)
+        #expect(name == ".untrusted-2026-09-03-42-1790000000")
+        #expect(OutsetSession.untrustedDate(name) == now)
+        #expect(OutsetSession.untrustedDate("2026-09-03") == nil)
+        #expect(OutsetSession.untrustedDate(".untrusted-junk") == nil)
+    }
+
+    @Test("Root sets aside a day directory it does not own and makes its own",
+          .enabled(if: geteuid() == 0))
+    func rootReclaimsForeignDayDirectory() throws {
+        let logs = temporaryLogs()
+        let day = logs + "/2026-09-03"
+        try FileManager.default.createDirectory(atPath: day, withIntermediateDirectories: false)
+        chown(day, 4_294_967_294, 4_294_967_294)
+        let start = OutsetSession.formatter("yyyy-MM-dd HH:mm:ss").date(from: "2026-09-03 04:11:07")!
+
+        _ = try #require(OutsetSession(logsDirectory: logs, version: "v", runType: "boot", start: start))
+        var info = stat()
+        #expect(lstat(day, &info) == 0)
+        #expect(info.st_uid == 0)
+        #expect(info.st_mode & 0o7777 == managedLogDirectoryMode)
+        let entries = try FileManager.default.contentsOfDirectory(atPath: logs)
+        #expect(entries.filter { $0.hasPrefix(OutsetSession.untrustedPrefix) }.count == 1)
+    }
+
+    @Test("Retention removes set-aside entries past the window without following them")
+    func retentionRemovesSetAsideEntries() throws {
+        let logs = temporaryLogs()
+        let target = temporaryLogs()
+        let fm = FileManager.default
+        fm.createFile(atPath: target + "/keep", contents: Data("x".utf8))
+        let now = OutsetSession.formatter("yyyy-MM-dd HH:mm:ss").date(from: "2026-09-03 04:11:07")!
+        let old = now.addingTimeInterval(-60 * 24 * 60 * 60)
+        let link = logs + "/" + OutsetSession.untrustedName(day: "2026-07-01", pid: 1, now: old)
+        let dir = logs + "/" + OutsetSession.untrustedName(day: "2026-07-02", pid: 2, now: old)
+        let recent = OutsetSession.untrustedName(day: "2026-09-02", pid: 3, now: now)
+        try fm.createSymbolicLink(atPath: link, withDestinationPath: target)
+        try fm.createDirectory(atPath: dir + "/120000", withIntermediateDirectories: true)
+        try fm.createDirectory(atPath: logs + "/" + recent, withIntermediateDirectories: false)
+
+        #expect(OutsetSession.prune(logsDirectory: logs, now: now) == 2)
+        #expect(Set(try fm.contentsOfDirectory(atPath: logs)) == [recent])
+        #expect(fm.fileExists(atPath: target + "/keep"))
     }
 
     @Test("Retention removes day directories past the window and the flat log it replaced")
