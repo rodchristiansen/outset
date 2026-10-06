@@ -1,0 +1,24 @@
+name: Managed State Keeper
+
+on:
+  pull_request:
+    paths:
+      - 'ManagedStateKeeper/**'
+      - '.github/workflows/managed-state-keeper.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'ManagedStateKeeper/**'
+
+jobs:
+  test:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: ManagedStateKeeper
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: swift test
+      - name: Build unsigned package
+        run: make pkg
