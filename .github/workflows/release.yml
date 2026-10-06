@@ -19,12 +19,19 @@ jobs:
         id: ver
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      # The bundle carries the tag as its version so the installer replaces an
+      # older Outset.app, including upstream builds, instead of skipping it.
       - name: Build Outset.app (unsigned)
+        env:
+          VERSION: ${{ steps.ver.outputs.VERSION }}
         run: |
           xcodebuild -project Outset.xcodeproj -scheme "Outset App Bundle" -configuration Release \
             -derivedDataPath ./build \
             CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$VERSION" \
             clean build
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" build/Build/Products/Release/Outset.app/Contents/Info.plist \
+            | grep -qx "$VERSION"
 
       - name: Build unsigned package
         env:
@@ -36,7 +43,12 @@ jobs:
           cp -R build/Build/Products/Release/Outset.app "$payload/Outset.app"
           cp Package/outset "$payload/outset"
           chmod a+x "$payload/outset"
-          pkgbuild --root "$payload" --scripts Package/Scripts --identifier io.macadmins.Outset \
+          # Install the app even over a newer bundle, so a rollback also lands.
+          pkgbuild --analyze --root "$payload" "$PWD/pkg/component.plist"
+          plutil -replace 0.BundleIsVersionChecked -bool NO "$PWD/pkg/component.plist"
+          plutil -replace 0.BundleIsRelocatable -bool NO "$PWD/pkg/component.plist"
+          pkgbuild --root "$payload" --component-plist "$PWD/pkg/component.plist" --scripts Package/Scripts \
+            --identifier io.macadmins.Outset \
             --version "$VERSION" --install-location /usr/local/outset "artifacts/Outset-component.pkg"
           productbuild --package "artifacts/Outset-component.pkg" --identifier io.macadmins.Outset \
             --version "$VERSION" "artifacts/Outset-${VERSION}.pkg"
