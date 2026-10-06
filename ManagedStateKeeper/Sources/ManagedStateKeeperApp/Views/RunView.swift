@@ -11,9 +11,7 @@ import ManagedStateKeeperXPC
 struct RunView: View {
     @Environment(XPCClient.self) private var xpcClient
     @State private var showDebug = false
-    // On-demand (user) runs only the signed-in user's own items, so it is the
-    // safe default; the root runs are one deliberate click away.
-    @State private var mode: RunMode = .onDemand
+    @State private var mode: RunMode = .loginPrivileged
 
     private var helperNeeded: Bool { mode.runsInHelper }
     private var helperAvailable: Bool { xpcClient.helperStatus == .available }

@@ -28,11 +28,9 @@ public enum StateKeeperConstants {
 /// The outset runs that make sense to start by hand. Each maps to fixed engine
 /// arguments; a caller names a mode and never supplies a command line.
 public enum RunMode: String, CaseIterable, Identifiable, Sendable {
-    // Picker order, harmless first: the user's on-demand items, then the
-    // root runs.
-    case onDemand = "on-demand"
-    case onDemandPrivileged = "on-demand-privileged"
     case loginPrivileged = "login-privileged"
+    case onDemandPrivileged = "on-demand-privileged"
+    case onDemand = "on-demand"
     case boot = "boot"
 
     public var id: String { rawValue }
