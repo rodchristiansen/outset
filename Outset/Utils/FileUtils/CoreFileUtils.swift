@@ -104,49 +104,69 @@ func verifyPermissions(pathname: String, trustedOwners: Set<uid_t> = [0]) -> Boo
 }
 
 func verifyParentChain(of pathname: String, trustedOwners: Set<uid_t> = [0]) -> Bool {
-    // outset runs the item by the path it was given, so the folders on that path are
-    // checked as written, and again after resolving symlinks. A symlinked folder on the
-    // path is accepted only when the folder holding it is root-only, which is what stops
-    // the link being replaced; the folders it resolves to must pass on their own.
+    // Resolves the item's folder one component at a time, the way the kernel will when
+    // outset runs it, and checks every folder the lookup passes through, including the
+    // folders that hold each symlink hop. Each folder must be owned by a trusted owner and
+    // not writable by group or other, so no other account can redirect the lookup.
     let parent = (pathname as NSString).deletingLastPathComponent
     guard parent.hasPrefix("/") else {
         writeLog("\(pathname) is not an absolute path", logLevel: .error)
         return false
     }
-    guard let resolved = realpath(parent, nil) else {
-        writeLog("Could not resolve the folder holding \(pathname)", logLevel: .error)
-        return false
-    }
-    let resolvedParent = String(cString: resolved)
-    free(resolved)
 
-    return verifyFolders(from: parent, item: pathname, allowLinks: true, trustedOwners: trustedOwners)
-        && verifyFolders(from: resolvedParent, item: pathname, allowLinks: false, trustedOwners: trustedOwners)
-}
-
-private func verifyFolders(from start: String, item: String, allowLinks: Bool, trustedOwners: Set<uid_t>) -> Bool {
-    // Walks from start up to /, requiring each entry to be owned by a trusted owner and,
-    // for folders, not writable by group or other.
-    var directory = start
-    while true {
+    func folderIsLocked(_ path: String) -> Bool {
         var info = stat()
-        guard lstat(directory, &info) == 0 else {
-            writeLog("Could not read folder \(directory) above \(item)", logLevel: .error)
+        guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else {
+            writeLog("\(path) above \(pathname) is not a readable folder. Skipping", logLevel: .error)
             return false
         }
-        let type = info.st_mode & S_IFMT
-        let isLink = type == S_IFLNK
-        guard type == S_IFDIR || (allowLinks && isLink) else {
-            writeLog("\(directory) above \(item) is not a folder. Skipping", logLevel: .error)
+        guard trustedOwners.contains(info.st_uid), info.st_mode & (S_IWGRP | S_IWOTH) == 0 else {
+            writeLog("Folder \(path) above \(pathname) must be owned by root and writable only by root. Skipping", logLevel: .error)
             return false
         }
-        guard trustedOwners.contains(info.st_uid), isLink || info.st_mode & (S_IWGRP | S_IWOTH) == 0 else {
-            writeLog("Folder \(directory) above \(item) must be owned by root and writable only by root. Skipping", logLevel: .error)
-            return false
-        }
-        if directory == "/" { return true }
-        directory = (directory as NSString).deletingLastPathComponent
+        return true
     }
+
+    guard folderIsLocked("/") else { return false }
+    var current = "/"
+    var remaining = Array(parent.split(separator: "/").map(String.init).reversed())
+    var hops = 0
+
+    while let component = remaining.popLast() {
+        switch component {
+        case ".":
+            continue
+        case "..":
+            current = (current as NSString).deletingLastPathComponent
+            continue
+        default:
+            break
+        }
+
+        let next = (current as NSString).appendingPathComponent(component)
+        var info = stat()
+        guard lstat(next, &info) == 0 else {
+            writeLog("Could not read \(next) above \(pathname)", logLevel: .error)
+            return false
+        }
+
+        if info.st_mode & S_IFMT == S_IFLNK {
+            // The link sits in `current`, which is already verified, so only root can change it.
+            hops += 1
+            guard hops <= 32, trustedOwners.contains(info.st_uid),
+                  let target = try? FileManager.default.destinationOfSymbolicLink(atPath: next) else {
+                writeLog("Could not follow \(next) above \(pathname). Skipping", logLevel: .error)
+                return false
+            }
+            if target.hasPrefix("/") { current = "/" }
+            remaining.append(contentsOf: target.split(separator: "/").map(String.init).reversed())
+            continue
+        }
+
+        guard folderIsLocked(next) else { return false }
+        current = next
+    }
+    return true
 }
 
 func pathCleanup(_ pathname: String) {

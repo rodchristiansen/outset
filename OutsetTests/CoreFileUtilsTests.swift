@@ -251,4 +251,26 @@ struct VerifyParentChainTests {
 
         #expect(verifyPermissions(pathname: link.appendingPathComponent("run.sh").path, trustedOwners: owners) == true)
     }
+
+    @Test("Rejects a chain of links whose middle hop sits in a writable folder")
+    func rejectsChainedLinkThroughWritableFolder() throws {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let real = base.appendingPathComponent("real")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: false)
+        let open = base.appendingPathComponent("open")
+        try FileManager.default.createDirectory(at: open, withIntermediateDirectories: false,
+                                                attributes: [.posixPermissions: 0o777])
+        let middle = open.appendingPathComponent("middle")
+        try FileManager.default.createSymbolicLink(at: middle, withDestinationURL: real)
+        let first = base.appendingPathComponent("scripts")
+        try FileManager.default.createSymbolicLink(atPath: first.path, withDestinationPath: middle.path)
+        FileManager.default.createFile(atPath: real.appendingPathComponent("run.sh").path,
+                                       contents: Data("#!/bin/sh\n".utf8),
+                                       attributes: [.posixPermissions: 0o755])
+
+        #expect(verifyPermissions(pathname: first.appendingPathComponent("run.sh").path, trustedOwners: owners) == false)
+    }
 }
