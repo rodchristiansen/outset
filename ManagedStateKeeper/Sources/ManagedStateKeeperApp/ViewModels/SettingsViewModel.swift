@@ -115,12 +115,9 @@ final class SettingsViewModel {
     static func read(from source: PreferenceSource) -> PreferenceSnapshot {
         var snapshot = PreferenceSnapshot()
         let waitKey = OutsetPreferenceKey.waitForNetwork.rawValue
-        if source.isManaged(waitKey) {
-            snapshot.waitForNetwork = boolValue(source.value(forKey: waitKey))
-        } else {
-            // The root engine treats the key's presence as on, whatever its value.
-            snapshot.waitForNetwork = source.value(forKey: waitKey) != nil
-        }
+        // Read by value, as the engine does from #6 on; an older engine treated
+        // any stored value, even false, as on.
+        snapshot.waitForNetwork = boolValue(source.value(forKey: waitKey))
         snapshot.networkTimeout = intValue(source.value(forKey: OutsetPreferenceKey.networkTimeout.rawValue)) ?? 180
         snapshot.backgroundScriptTimeout = intValue(source.value(forKey: OutsetPreferenceKey.backgroundScriptTimeout.rawValue)) ?? 0
         snapshot.ignoredUsers = source.value(forKey: OutsetPreferenceKey.ignoredUsers.rawValue) as? [String] ?? []

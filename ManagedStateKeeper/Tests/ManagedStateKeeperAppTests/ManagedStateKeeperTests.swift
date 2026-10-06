@@ -125,8 +125,8 @@ private struct FakeSource: PreferenceSource {
             "ignored_users": ["admin"],
             "verbose_logging": 1
         ]))
-        // The root engine treats an unmanaged wait_for_network as on whenever it exists.
-        #expect(snapshot.waitForNetwork)
+        // A stored false is off, as the engine reads it.
+        #expect(!snapshot.waitForNetwork)
         #expect(snapshot.networkTimeout == 60)
         #expect(snapshot.backgroundScriptTimeout == 0)
         #expect(snapshot.ignoredUsers == ["admin"])
