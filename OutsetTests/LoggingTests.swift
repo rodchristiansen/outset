@@ -172,6 +172,50 @@ struct OutsetSessionTests {
         #expect(fm.fileExists(atPath: target + "/keep"))
     }
 
+    @Test("A link inside an expired day directory is unlinked and its target survives")
+    func retentionUnlinksLinksInsideExpiredDays() throws {
+        let logs = temporaryLogs()
+        let target = temporaryLogs()
+        let fm = FileManager.default
+        fm.createFile(atPath: target + "/keep", contents: Data("x".utf8))
+        try fm.createDirectory(atPath: logs + "/2026-07-01/120000", withIntermediateDirectories: true)
+        try fm.createSymbolicLink(atPath: logs + "/2026-07-01/link", withDestinationPath: target)
+        try fm.createSymbolicLink(atPath: logs + "/2026-07-01/120000/link", withDestinationPath: target)
+        let now = OutsetSession.formatter("yyyy-MM-dd HH:mm:ss").date(from: "2026-09-03 04:11:07")!
+
+        #expect(OutsetSession.prune(logsDirectory: logs, now: now) == 1)
+        #expect(try fm.contentsOfDirectory(atPath: logs).isEmpty)
+        #expect(fm.fileExists(atPath: target + "/keep"))
+    }
+
+    @Test("A folder nested below a session directory is left in place")
+    func retentionLeavesDeeperFolders() throws {
+        let logs = temporaryLogs()
+        let fm = FileManager.default
+        try fm.createDirectory(atPath: logs + "/2026-07-01/120000/deeper", withIntermediateDirectories: true)
+        fm.createFile(atPath: logs + "/2026-07-01/120000/outset.log", contents: Data("x".utf8))
+        let now = OutsetSession.formatter("yyyy-MM-dd HH:mm:ss").date(from: "2026-09-03 04:11:07")!
+
+        #expect(OutsetSession.prune(logsDirectory: logs, now: now) == 0)
+        #expect(fm.fileExists(atPath: logs + "/2026-07-01/120000/deeper"))
+        #expect(!fm.fileExists(atPath: logs + "/2026-07-01/120000/outset.log"))
+    }
+
+    @Test("A link named like a recent day is not walked by the session cap")
+    func sessionCapIgnoresLinkedDays() throws {
+        let logs = temporaryLogs()
+        let target = temporaryLogs()
+        let fm = FileManager.default
+        for index in 0..<(OutsetSession.maxSessions + 5) {
+            try fm.createDirectory(atPath: target + String(format: "/%06d", index), withIntermediateDirectories: false)
+        }
+        try fm.createSymbolicLink(atPath: logs + "/2026-09-02", withDestinationPath: target)
+        let now = OutsetSession.formatter("yyyy-MM-dd HH:mm:ss").date(from: "2026-09-03 04:11:07")!
+
+        #expect(OutsetSession.prune(logsDirectory: logs, now: now) == 0)
+        #expect(try fm.contentsOfDirectory(atPath: target).count == OutsetSession.maxSessions + 5)
+    }
+
     @Test("Retention removes day directories past the window and the flat log it replaced")
     func retention() throws {
         let logs = temporaryLogs()

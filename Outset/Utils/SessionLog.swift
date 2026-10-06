@@ -188,53 +188,61 @@ final class OutsetSession {
     // MARK: - Retention
 
     /// Removes day directories older than the retention window, then the oldest
-    /// session directories beyond the cap, then the flat log and its rotated
-    /// generations left at the root by the layout this replaced. Every removal
-    /// is best-effort: in the shared sticky directory another context's files
-    /// are not this process's to delete.
+    /// session directories beyond the cap, then entries root set aside, then
+    /// the flat log and its rotated generations left at the root by the layout
+    /// this replaced. Every removal is best-effort: in the shared sticky
+    /// directory another context's files are not this process's to delete.
+    ///
+    /// Nothing here deletes recursively or follows a link. Every step works
+    /// relative to a directory opened with O_NOFOLLOW, so an entry swapped for
+    /// a link mid-walk is unlinked, never walked into.
     @discardableResult
     static func prune(logsDirectory: String, now: Date = Date()) -> Int {
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(atPath: logsDirectory) else { return 0 }
         guard let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: now) else { return 0 }
+        let root = open(logsDirectory, O_RDONLY | O_DIRECTORY)
+        guard root >= 0 else { return 0 }
+        defer { close(root) }
+        let entries = directoryEntryNames(root)
         let dayFormatter = formatter("yyyy-MM-dd")
         var removed = 0
 
         var surviving: [String] = []
         for entry in entries.sorted(by: >) {
-            guard let day = dayFormatter.date(from: entry), isDirectory(entry, in: logsDirectory) else { continue }
-            let path = (logsDirectory as NSString).appendingPathComponent(entry)
+            guard let day = dayFormatter.date(from: entry), isDirectoryEntry(entry, in: root) else { continue }
             if day < cutoff {
-                if (try? fm.removeItem(atPath: path)) != nil { removed += 1 }
+                if removeEntryNoFollow(entry, in: root, depth: 1) { removed += 1 }
             } else {
-                surviving.append(path)
+                surviving.append(entry)
             }
         }
 
-        var sessions: [String] = []
-        for dayPath in surviving {
-            guard let names = try? fm.contentsOfDirectory(atPath: dayPath) else { continue }
-            for name in names.sorted(by: >) {
-                let full = (dayPath as NSString).appendingPathComponent(name)
-                var isDir: ObjCBool = false
-                if fm.fileExists(atPath: full, isDirectory: &isDir), isDir.boolValue { sessions.append(full) }
+        var dayDescriptors: [Int32] = []
+        defer { dayDescriptors.forEach { close($0) } }
+        var sessions: [(day: Int32, name: String)] = []
+        for day in surviving {
+            let fd = openat(root, day, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+            guard fd >= 0 else { continue }
+            dayDescriptors.append(fd)
+            for name in directoryEntryNames(fd).sorted(by: >) where isDirectoryEntry(name, in: fd) {
+                sessions.append((fd, name))
             }
         }
         if sessions.count > maxSessions {
-            for path in sessions[maxSessions...] where (try? fm.removeItem(atPath: path)) != nil { removed += 1 }
+            for session in sessions[maxSessions...] where removeEntryNoFollow(session.name, in: session.day) {
+                removed += 1
+            }
         }
 
         for entry in entries {
             guard let setAsideAt = untrustedDate(entry), setAsideAt < cutoff else { continue }
-            if removeWithoutFollowing((logsDirectory as NSString).appendingPathComponent(entry)) { removed += 1 }
+            if removeEntryNoFollow(entry, in: root, depth: 1) { removed += 1 }
         }
 
         for entry in entries where entry.hasPrefix(logFileName) {
-            let path = (logsDirectory as NSString).appendingPathComponent(entry)
-            guard let attrs = try? fm.attributesOfItem(atPath: path),
-                  (attrs[.type] as? FileAttributeType) == .typeRegular,
-                  let modified = attrs[.modificationDate] as? Date, modified < cutoff else { continue }
-            if (try? fm.removeItem(atPath: path)) != nil { removed += 1 }
+            var info = stat()
+            guard fstatat(root, entry, &info, AT_SYMLINK_NOFOLLOW) == 0, (info.st_mode & S_IFMT) == S_IFREG,
+                  Double(info.st_mtimespec.tv_sec) < cutoff.timeIntervalSince1970 else { continue }
+            if unlinkat(root, entry, 0) == 0 { removed += 1 }
         }
         return removed
     }
@@ -290,21 +298,50 @@ final class OutsetSession {
         return Date(timeIntervalSince1970: TimeInterval(epoch))
     }
 
-    /// Removes `path` without following it: a link or file is unlinked, a real
-    /// directory removed with its contents.
-    static func removeWithoutFollowing(_ path: String) -> Bool {
-        var info = stat()
-        guard lstat(path, &info) == 0 else { return false }
-        if (info.st_mode & S_IFMT) == S_IFDIR {
-            return (try? FileManager.default.removeItem(atPath: path)) != nil
+    /// Names in the directory open at `fd`, without "." and "..".
+    static func directoryEntryNames(_ fd: Int32) -> [String] {
+        let copy = dup(fd)
+        guard copy >= 0 else { return [] }
+        guard let dir = fdopendir(copy) else { close(copy); return [] }
+        defer { closedir(dir) }
+        rewinddir(dir)
+        var names: [String] = []
+        while let entry = readdir(dir) {
+            let name = withUnsafeBytes(of: entry.pointee.d_name) { bytes in
+                String(cString: bytes.bindMemory(to: CChar.self).baseAddress!)
+            }
+            if name != "." && name != ".." { names.append(name) }
         }
-        return unlink(path) == 0
+        return names
     }
 
-    static func isDirectory(_ name: String, in parent: String) -> Bool {
-        var isDir: ObjCBool = false
-        let full = (parent as NSString).appendingPathComponent(name)
-        return FileManager.default.fileExists(atPath: full, isDirectory: &isDir) && isDir.boolValue
+    /// True when `name` in the directory open at `fd` is a real directory, not a link.
+    static func isDirectoryEntry(_ name: String, in fd: Int32) -> Bool {
+        var info = stat()
+        return fstatat(fd, name, &info, AT_SYMLINK_NOFOLLOW) == 0 && (info.st_mode & S_IFMT) == S_IFDIR
+    }
+
+    /// Removes `name` from the directory open at `parent` without following a
+    /// link. A link or file is unlinked. A directory is opened with O_NOFOLLOW,
+    /// its files and links unlinked, its subdirectories handled the same way
+    /// down to `depth` more levels, and it is removed only once it is empty;
+    /// anything deeper is left in place. Returns true when the entry is gone.
+    @discardableResult
+    static func removeEntryNoFollow(_ name: String, in parent: Int32, depth: Int = 0) -> Bool {
+        var info = stat()
+        guard fstatat(parent, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { return false }
+        guard (info.st_mode & S_IFMT) == S_IFDIR else { return unlinkat(parent, name, 0) == 0 }
+        let fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard fd >= 0 else { return false }
+        for child in directoryEntryNames(fd) {
+            if isDirectoryEntry(child, in: fd) {
+                if depth > 0 { removeEntryNoFollow(child, in: fd, depth: depth - 1) }
+            } else {
+                unlinkat(fd, child, 0)
+            }
+        }
+        close(fd)
+        return unlinkat(parent, name, AT_REMOVEDIR) == 0
     }
 
     static func formatter(_ format: String) -> DateFormatter {
