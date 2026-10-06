@@ -93,6 +93,35 @@ struct OutsetSessionTests {
         #expect(second.sessionId == "2026-09-03-041107_2")
     }
 
+    @Test("A symlink planted under the day's name is not followed or changed")
+    func dayDirectorySymlinkIsRefused() throws {
+        let logs = temporaryLogs()
+        let target = temporaryLogs()
+        chmod(target, 0o755)
+        try FileManager.default.createSymbolicLink(atPath: logs + "/2026-09-03", withDestinationPath: target)
+        let start = OutsetSession.formatter("yyyy-MM-dd HH:mm:ss").date(from: "2026-09-03 04:11:07")!
+
+        #expect(OutsetSession(logsDirectory: logs, version: "v", runType: "boot", start: start) == nil)
+        var info = stat()
+        #expect(stat(target, &info) == 0)
+        #expect(info.st_mode & 0o7777 == 0o755)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: target).isEmpty)
+    }
+
+    @Test("An existing day directory keeps its mode")
+    func existingDayDirectoryModeIsLeftAlone() throws {
+        let logs = temporaryLogs()
+        let day = logs + "/2026-09-03"
+        try FileManager.default.createDirectory(atPath: day, withIntermediateDirectories: false,
+                                                attributes: [.posixPermissions: 0o755])
+        let start = OutsetSession.formatter("yyyy-MM-dd HH:mm:ss").date(from: "2026-09-03 04:11:07")!
+
+        _ = try #require(OutsetSession(logsDirectory: logs, version: "v", runType: "boot", start: start))
+        var info = stat()
+        #expect(lstat(day, &info) == 0)
+        #expect(info.st_mode & 0o7777 == 0o755)
+    }
+
     @Test("Retention removes day directories past the window and the flat log it replaced")
     func retention() throws {
         let logs = temporaryLogs()

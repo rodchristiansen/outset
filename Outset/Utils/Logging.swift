@@ -59,8 +59,8 @@ func formatLogFileLine(_ message: String, logLevel: OSLogType, date: Date = Date
 func ensureManagedLogDirectory() {
     guard getuid() == 0 else { return }
     var info = stat()
-    if stat(managedLogDirectory, &info) == 0 {
-        if (info.st_mode & S_IFMT) == S_IFDIR, (info.st_mode & 0o7777) != managedLogDirectoryMode {
+    if lstat(managedLogDirectory, &info) == 0 {
+        if (info.st_mode & S_IFMT) == S_IFDIR, info.st_uid == 0, (info.st_mode & 0o7777) != managedLogDirectoryMode {
             chmod(managedLogDirectory, managedLogDirectoryMode)
         }
         return
