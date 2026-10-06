@@ -31,12 +31,18 @@ ICONSET = $(BUILD_DIR)/ManagedStateKeeper.iconset
 PKG_ID = io.macadmins.Outset.gui
 PKG_OUTPUT = $(BUILD_DIR)/ManagedStateKeeper-$(VERSION).pkg
 
-.PHONY: all build test app pkg clean
+.PHONY: all build test app pkg notarize verify clean
 
 all: pkg
 
+# Record the SDK the binaries are linked against. Some toolchains write the
+# deployment target as the SDK version, and AppKit then keeps the pre-macOS 26
+# window chrome (a title bar plus a small tab strip) instead of the toolbar tabs.
+SDK_VERSION := $(shell xcrun --show-sdk-version)
+SWIFT_LINK_FLAGS = -Xlinker -platform_version -Xlinker macos -Xlinker 14.0 -Xlinker $(SDK_VERSION)
+
 build:
-	swift build -c release --arch arm64 --arch x86_64
+	swift build -c release --arch arm64 --arch x86_64 $(SWIFT_LINK_FLAGS)
 
 test:
 	swift test
@@ -81,6 +87,22 @@ else
 endif
 	@rm -f "$(BUILD_DIR)/component.pkg"
 	@echo "Built $(PKG_OUTPUT)"
+
+# Notarize and staple the signed package, as BootstrapMate does. Needs a
+# notarytool keychain profile in NOTARIZATION_PROFILE.
+notarize: pkg
+ifeq ($(NOTARIZATION_PROFILE),)
+	@echo "NOTARIZATION_PROFILE not set: cannot notarize" && exit 1
+endif
+	@xcrun notarytool submit "$(PKG_OUTPUT)" --keychain-profile "$(NOTARIZATION_PROFILE)" --wait
+	@xcrun stapler staple "$(PKG_OUTPUT)"
+	@echo "Notarized and stapled $(PKG_OUTPUT)"
+
+verify:
+	@pkgutil --check-signature "$(PKG_OUTPUT)"
+	@spctl --assess --type install --verbose "$(PKG_OUTPUT)"
+	@codesign --verify --strict --verbose=2 "$(PKG_ROOT)/$(APP_BUNDLE_PATH)"
+	@codesign -dr - "$(APP_CONTENTS)/MacOS/$(HELPER_BINARY_NAME)"
 
 clean:
 	@rm -rf $(BUILD_DIR) .build

@@ -48,6 +48,11 @@ final class HelperCommandRunner: NSObject, HelperXPCProtocol, @unchecked Sendabl
         task.executableURL = URL(fileURLWithPath: executable)
         task.arguments = runMode.arguments
         task.standardInput = FileHandle.nullDevice
+        // Outset writes through stdio, which a pipe makes fully buffered; without
+        // this its lines reach the window only when the run ends.
+        var environment = ProcessInfo.processInfo.environment
+        environment["NSUnbufferedIO"] = "YES"
+        task.environment = environment
 
         let pipe = Pipe()
         task.standardOutput = pipe

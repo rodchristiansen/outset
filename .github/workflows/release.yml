@@ -59,6 +59,11 @@ jobs:
         working-directory: ManagedStateKeeper
         run: |
           set -euo pipefail
+          # Link against a macOS 26 SDK, as BootstrapMate's release does, so the
+          # window gets the macOS 26 toolbar tabs rather than the older title bar.
+          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XCODE" ]; then export DEVELOPER_DIR="$XCODE/Contents/Developer"; fi
+          xcrun --show-sdk-version
           GUI_VERSION=$(date -u '+%Y.%m.%d.%H%M')
           make pkg VERSION="$GUI_VERSION"
           cp "build/ManagedStateKeeper-${GUI_VERSION}.pkg" ../artifacts/

@@ -26,9 +26,6 @@ struct SettingsView: View {
             VStack(spacing: 16) {
                 appInfoHeader
 
-                saveStatusLabel
-                    .frame(height: 18)
-
                 Divider()
 
                 HStack(alignment: .top, spacing: 20) {
@@ -45,6 +42,12 @@ struct SettingsView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
+
+                HStack {
+                    Spacer()
+                    saveStatusLabel
+                }
+                .padding(.top, 4)
             }
             .padding()
         }
@@ -58,23 +61,19 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var appInfoHeader: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 56, height: 56)
+                .frame(width: 72, height: 72)
 
             Text("Managed State Keeper")
-                .font(.title2.bold())
+                .font(.largeTitle.bold())
 
             Text("Runs scripts and packages at boot, at login and on demand to keep each Mac in its managed state.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-
-            Text("v\(marketingVersion) (\(buildNumber))")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
 
             HStack(spacing: 16) {
                 Link("Documentation", destination: URL(string: "https://github.com/rodchristiansen/outset#readme")!)

@@ -166,9 +166,13 @@ struct RunView: View {
     @ViewBuilder
     private var statusIndicator: some View {
         if let exitCode = xpcClient.lastExitCode {
-            if exitCode == 0 {
+            if exitCode == 0 && xpcClient.errorCount == 0 {
                 Label("Completed", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
+            } else if exitCode == 0 {
+                // Matches the banner: a run that logged errors is not shown as clean.
+                Label("Completed with errors", systemImage: "exclamationmark.circle.fill")
+                    .foregroundStyle(.red)
             } else {
                 Label("Failed (exit \(exitCode))", systemImage: "xmark.circle.fill")
                     .foregroundStyle(.red)

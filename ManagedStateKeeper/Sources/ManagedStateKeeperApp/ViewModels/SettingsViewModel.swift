@@ -102,7 +102,9 @@ final class SettingsViewModel {
         let signingKey = "manifest_signing_key"
         if source.isManaged(signingKey) {
             signingKeyState = .managed
-        } else if source.value(forKey: signingKey) != nil {
+        } else if let key = source.value(forKey: signingKey) as? String,
+                  !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // An empty key left behind by an older outset is no key at all.
             signingKeyState = .ignored
         } else {
             signingKeyState = .notSet
