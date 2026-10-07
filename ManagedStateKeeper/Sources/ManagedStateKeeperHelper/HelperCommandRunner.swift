@@ -154,12 +154,19 @@ final class HelperCommandRunner: NSObject, HelperXPCProtocol, @unchecked Sendabl
     }
 
     private func write(key: String, value: CFPropertyList?, reply: @escaping (Bool) -> Void) {
-        guard OutsetPreferenceKey.isWritable(key) else {
+        guard OutsetPreferenceKey.isWritable(key, isForced: Self.isForced) else {
             reply(false)
             return
         }
         CFPreferencesSetValue(key as CFString, value, Self.domain, kCFPreferencesAnyUser, kCFPreferencesAnyHost)
         reply(CFPreferencesSynchronize(Self.domain, kCFPreferencesAnyUser, kCFPreferencesAnyHost))
+    }
+
+    /// A profile forces the key, either as CFPreferences saw it at start-up or in the
+    /// managed preferences file as it is now.
+    static func isForced(_ key: String) -> Bool {
+        CFPreferencesAppValueIsForced(key as CFString, domain)
+            || OutsetPreferenceKey.managedFileSetsKey(key)
     }
 
     // MARK: - Version
