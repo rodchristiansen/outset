@@ -188,3 +188,26 @@ private struct FakeSource: PreferenceSource {
         #expect(SettingsViewModel.parseUsers("").isEmpty)
     }
 }
+
+// MARK: - Helper write policy for profile-forced keys
+
+@Suite struct ForcedKeyWriteTests {
+    @Test func forcedKeyIsRefused() {
+        #expect(OutsetPreferenceKey.isWritable("network_timeout", isForced: { _ in false }))
+        #expect(!OutsetPreferenceKey.isWritable("network_timeout", isForced: { $0 == "network_timeout" }))
+        #expect(OutsetPreferenceKey.isWritable("ignored_users", isForced: { $0 == "network_timeout" }))
+        #expect(!OutsetPreferenceKey.isWritable("not_a_key", isForced: { _ in false }))
+    }
+
+    @Test func managedFileIsReadAsItIsNow() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("io.macadmins.Outset.plist").path
+
+        #expect(!OutsetPreferenceKey.managedFileSetsKey("network_timeout", path: path))
+        try (["network_timeout": 600] as NSDictionary).write(to: URL(fileURLWithPath: path))
+        #expect(OutsetPreferenceKey.managedFileSetsKey("network_timeout", path: path))
+        #expect(!OutsetPreferenceKey.managedFileSetsKey("ignored_users", path: path))
+    }
+}
