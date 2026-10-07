@@ -8,7 +8,9 @@ its paths under `/usr/local/outset` and its launchd jobs unchanged.
   configuration profile manages shows its managed value, locked.
 - **Run** starts one of a fixed set of outset runs: login (privileged),
   on-demand (privileged), on-demand (user) and boot, and streams the output.
-- **Logs** lists each run under `/Library/Managed State/logs`.
+- **Logs** lists root runs from `/Library/Managed State/logs` and the signed-in
+  user's runs (login-every, login-once, on-demand) from
+  `~/Library/Logs/Managed State`, each under its own heading.
 
 It ships inside the outset package, `Outset-<version>.pkg`, so every Mac that
 gets outset gets the window too; there is no separate package.

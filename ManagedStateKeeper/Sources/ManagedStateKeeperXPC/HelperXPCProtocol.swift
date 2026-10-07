@@ -19,8 +19,15 @@ public enum StateKeeperConstants {
     public static let appIdentifier = "io.macadmins.Outset.gui"
     /// The outset engine, as the outset package installs it.
     public static let outsetExecutablePath = "/usr/local/outset/Outset.app/Contents/MacOS/Outset"
-    /// Where outset writes its session directories and the shared flat log.
+    /// Where root runs of outset write their session directories. Root only.
     public static let logsDirectory = "/Library/Managed State/logs"
+    /// Where user-context runs (login-every, login-once, on-demand) write theirs,
+    /// relative to the user's home folder.
+    public static let userLogsSubpath = "Library/Logs/Managed State"
+    /// `userLogsSubpath` in `home`.
+    public static func userLogsDirectory(home: String = NSHomeDirectory()) -> String {
+        (home as NSString).appendingPathComponent(userLogsSubpath)
+    }
     /// The file outset's on-demand LaunchAgent watches in the user's session.
     public static let onDemandTrigger = "/private/tmp/.io.macadmins.outset.ondemand.launchd"
 }

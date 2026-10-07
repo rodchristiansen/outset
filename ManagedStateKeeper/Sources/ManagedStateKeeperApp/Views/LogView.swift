@@ -2,8 +2,9 @@
 //  LogView.swift
 //  Managed State Keeper
 //
-//  Logs tab: outset's runs from /Library/Managed State/logs, newest first,
-//  with the selected run's log beside them.
+//  Logs tab: outset's root runs from /Library/Managed State/logs and this
+//  user's runs from ~/Library/Logs/Managed State, each under its own heading,
+//  newest first, with the selected run's log beside them.
 //
 
 import SwiftUI
@@ -16,6 +17,15 @@ struct LogView: View {
     @State private var filterText: String = ""
 
     private let logDirectory = StateKeeperConstants.logsDirectory
+    private let userLogDirectory = StateKeeperConstants.userLogsDirectory()
+
+    private func directory(for source: LogSource) -> String {
+        source == .system ? logDirectory : userLogDirectory
+    }
+
+    private func heading(for source: LogSource) -> String {
+        source == .system ? source.label : "\(source.label) (\(NSUserName()))"
+    }
 
     var body: some View {
         HSplitView {
@@ -42,8 +52,9 @@ struct LogView: View {
                     openSelectedLog()
                 }
                 .disabled(selected == nil)
-                sidebarButton(icon: "folder", help: "Open log folder in Finder") {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: logDirectory))
+                sidebarButton(icon: "folder", help: "Open the selected log's folder in Finder") {
+                    let folder = directory(for: selected?.source ?? .system)
+                    NSWorkspace.shared.open(URL(fileURLWithPath: folder))
                 }
                 sidebarButton(icon: "arrow.clockwise", help: "Refresh log list") {
                     refresh()
@@ -54,21 +65,17 @@ struct LogView: View {
 
             Divider()
 
-            List(sessions, selection: $selected) { session in
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(session.displayDate)
-                        Text(session.name)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+            List(selection: $selected) {
+                ForEach(LogSource.allCases, id: \.self) { source in
+                    let group = sessions.filter { $0.source == source }
+                    if !group.isEmpty {
+                        Section(heading(for: source)) {
+                            ForEach(group) { session in
+                                sessionRow(session)
+                            }
+                        }
                     }
-                    Spacer()
-                    Text(session.displaySize)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
-                .tag(session)
             }
             .listStyle(.sidebar)
             .frame(maxHeight: .infinity)
@@ -77,7 +84,7 @@ struct LogView: View {
                     ContentUnavailableView {
                         Label("No Logs Yet", systemImage: "doc.text.magnifyingglass")
                     } description: {
-                        Text("Logs are written to \(logDirectory).")
+                        Text("Root runs log to \(logDirectory), and this user's runs to \(userLogDirectory).")
                     }
                 }
             }
@@ -87,6 +94,23 @@ struct LogView: View {
                 logContent = (try? String(contentsOfFile: session.path, encoding: .utf8)) ?? "Unable to read log file."
             }
         }
+    }
+
+    private func sessionRow(_ session: LogSession) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.displayDate)
+                Text(session.name)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Text(session.displaySize)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .tag(session)
     }
 
     @ViewBuilder
@@ -154,7 +178,7 @@ struct LogView: View {
     // MARK: - Actions
 
     private func refresh() {
-        sessions = LogSessionStore.sessions(in: logDirectory)
+        sessions = LogSessionStore.sessions(system: logDirectory, user: userLogDirectory)
         if let current = selected, let match = sessions.first(where: { $0.id == current.id }) {
             selected = match
             logContent = (try? String(contentsOfFile: match.path, encoding: .utf8)) ?? logContent

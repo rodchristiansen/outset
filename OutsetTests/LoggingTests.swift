@@ -115,13 +115,13 @@ struct OutsetSessionTests {
         let logs = temporaryLogs()
         let day = logs + "/2026-09-03"
         try FileManager.default.createDirectory(atPath: day, withIntermediateDirectories: false,
-                                                attributes: [.posixPermissions: 0o755])
+                                                attributes: [.posixPermissions: 0o750])
         let start = OutsetSession.formatter("yyyy-MM-dd HH:mm:ss").date(from: "2026-09-03 04:11:07")!
 
         _ = try #require(OutsetSession(logsDirectory: logs, version: "v", runType: "boot", start: start))
         var info = stat()
         #expect(lstat(day, &info) == 0)
-        #expect(info.st_mode & 0o7777 == 0o755)
+        #expect(info.st_mode & 0o7777 == 0o750)
     }
 
     @Test("A set-aside name carries the time it was set aside")
@@ -234,5 +234,176 @@ struct OutsetSessionTests {
 
         #expect(removed == 3)
         #expect(Set(try fm.contentsOfDirectory(atPath: logs)) == ["2026-08-30"])
+    }
+}
+
+@Suite("Log locations")
+struct LogLocationTests {
+
+    @Test("User-context runs log under ~/Library/Logs/Managed State")
+    func userDirectoryMirrorsTheManagedLayout() {
+        #expect(userLogDirectoryPath(home: "/Users/someone") == "/Users/someone/Library/Logs/Managed State")
+    }
+
+    @Test("A user's first run creates its log root and a session inside it")
+    func firstUserRunCreatesTheRoot() throws {
+        let home = NSTemporaryDirectory() + "outset-home-" + UUID().uuidString
+        let logs = userLogDirectoryPath(home: home)
+        let start = OutsetSession.formatter("yyyy-MM-dd HH:mm:ss").date(from: "2026-09-03 04:11:07")!
+        let session = try #require(OutsetSession(logsDirectory: logs, version: "v", runType: "login", start: start))
+        #expect(session.logFilePath == logs + "/2026-09-03/041107/outset.log")
+        var info = stat()
+        #expect(lstat(logs, &info) == 0)
+        #expect(info.st_mode & 0o7777 == 0o755)
+        #expect(info.st_uid == geteuid())
+    }
+
+    @Test("Only a root run with a locked managed directory logs there")
+    func contextDecidesTheRoot() {
+        let user = "/Users/someone/Library/Logs/Managed State"
+        #expect(resolveLogDirectory(isRoot: true, managedReady: true, userDirectory: user) == managedLogDirectory)
+        #expect(resolveLogDirectory(isRoot: true, managedReady: false, userDirectory: user) == user)
+        #expect(resolveLogDirectory(isRoot: false, managedReady: true, userDirectory: user) == user)
+        #expect(resolveLogDirectory(isRoot: false, managedReady: false, userDirectory: user) == user)
+    }
+
+    @Test("Recognises paths inside the managed directory and nothing else")
+    func insideManagedDirectory() {
+        #expect(isInsideManagedLogDirectory(managedLogDirectory))
+        #expect(isInsideManagedLogDirectory(managedLogDirectory + "/2026-09-03/041107"))
+        #expect(!isInsideManagedLogDirectory(managedLogDirectory + "-other/x"))
+        #expect(!isInsideManagedLogDirectory("/Users/someone/Library/Logs/Managed State/2026-09-03"))
+    }
+
+    @Test("The managed folder is root's: 0755 folders and 0644 files")
+    func managedModes() {
+        #expect(managedLogDirectoryMode == 0o755)
+        #expect(managedLogFileMode == 0o644)
+    }
+}
+
+@Suite("Locking the managed log directory")
+struct LogDirectoryLockTests {
+
+    private let me = geteuid()
+    private let myGroup = getegid()
+    private var trusted: Set<uid_t> { [0, geteuid()] }
+
+    /// A scratch folder reached without any symlink (NSTemporaryDirectory sits under /var).
+    private func scratch() -> String {
+        // realpath, not resolvingSymlinksInPath, which maps /private/var back to /var.
+        let base = realpath(NSTemporaryDirectory(), nil).map { pointer in
+            defer { free(pointer) }
+            return String(cString: pointer)
+        } ?? NSTemporaryDirectory()
+        let path = base + "/outset-lock-" + UUID().uuidString
+        mkdir(path, 0o755)
+        chmod(path, 0o755)
+        return path
+    }
+
+    private func mode(_ path: String) -> mode_t {
+        var info = stat()
+        lstat(path, &info)
+        return info.st_mode & 0o7777
+    }
+
+    @Test("Creates the owned folders 0755 and returns the last one")
+    func createsOwnedFolders() {
+        let base = scratch()
+        let logs = base + "/Managed State/logs"
+        let fd = openLockedLogDirectory(logs, ownedComponents: 2, trustedOwners: trusted, owner: me, group: myGroup)
+        #expect(fd >= 0)
+        if fd >= 0 { close(fd) }
+        #expect(mode(base + "/Managed State") == 0o755)
+        #expect(mode(logs) == 0o755)
+    }
+
+    @Test("Resets a world-writable owned folder to 0755")
+    func resetsWorldWritableFolder() {
+        let base = scratch()
+        let logs = base + "/Managed State/logs"
+        mkdir(base + "/Managed State", 0o755)
+        mkdir(logs, 0o755)
+        chmod(logs, 0o1777)
+        let fd = openLockedLogDirectory(logs, ownedComponents: 2, trustedOwners: trusted, owner: me, group: myGroup)
+        #expect(fd >= 0)
+        if fd >= 0 { close(fd) }
+        #expect(mode(logs) == 0o755)
+    }
+
+    @Test("Refuses a symlink in place of an owned folder and leaves its target alone")
+    func refusesOwnedSymlink() throws {
+        let base = scratch()
+        let target = scratch()
+        chmod(target, 0o700)
+        try FileManager.default.createSymbolicLink(atPath: base + "/Managed State", withDestinationPath: target)
+        let fd = openLockedLogDirectory(base + "/Managed State/logs", ownedComponents: 2,
+                                        trustedOwners: trusted, owner: me, group: myGroup)
+        #expect(fd == -1)
+        #expect(mode(target) == 0o700)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: target).isEmpty)
+    }
+
+    @Test("Refuses a symlink anywhere above the folder")
+    func refusesAncestorSymlink() {
+        // /var is a symlink to /private/var on macOS.
+        let viaLink = NSTemporaryDirectory().hasPrefix("/var/") ? NSTemporaryDirectory() : "/var/tmp/"
+        let fd = openLockedLogDirectory(viaLink + "outset-lock-\(UUID().uuidString)/logs", ownedComponents: 1,
+                                        trustedOwners: trusted, owner: me, group: myGroup)
+        #expect(fd == -1)
+    }
+
+    @Test("Refuses a folder above that other accounts can write")
+    func refusesWritableAncestor() {
+        let base = scratch()
+        chmod(base, 0o777)
+        let fd = openLockedLogDirectory(base + "/Managed State/logs", ownedComponents: 2,
+                                        trustedOwners: trusted, owner: me, group: myGroup)
+        #expect(fd == -1)
+        #expect(!FileManager.default.fileExists(atPath: base + "/Managed State"))
+    }
+
+    @Test("Resets a world-writable layout and drops links instead of following them")
+    func locksLegacyTree() throws {
+        let fm = FileManager.default
+        let base = scratch()
+        let outside = scratch()
+        let logs = base + "/Managed State/logs"
+        try fm.createDirectory(atPath: logs + "/2026-09-03/041107", withIntermediateDirectories: true)
+        for dir in [logs, logs + "/2026-09-03"] { chmod(dir, 0o1777) }
+        fm.createFile(atPath: logs + "/outset.log", contents: Data("old".utf8))
+        fm.createFile(atPath: logs + "/2026-09-03/041107/outset.log", contents: Data("x".utf8))
+        chmod(logs + "/outset.log", 0o666)
+        chmod(logs + "/2026-09-03/041107/outset.log", 0o666)
+        fm.createFile(atPath: outside + "/secret", contents: Data("s".utf8))
+        chmod(outside + "/secret", 0o600)
+        try fm.createSymbolicLink(atPath: logs + "/2026-09-03/link", withDestinationPath: outside + "/secret")
+        #expect(link(outside + "/secret", logs + "/2026-09-03/041107/events.jsonl") == 0)
+
+        #expect(prepareManagedLogDirectory(logs, ownedComponents: 2, trustedOwners: trusted, owner: me, group: myGroup))
+
+        #expect(mode(logs) == 0o755)
+        #expect(mode(logs + "/2026-09-03") == 0o755)
+        #expect(mode(logs + "/2026-09-03/041107") == 0o755)
+        #expect(mode(logs + "/outset.log") == 0o644)
+        #expect(mode(logs + "/2026-09-03/041107/outset.log") == 0o644)
+        #expect(!fm.fileExists(atPath: logs + "/2026-09-03/041107/events.jsonl"))
+        var info = stat()
+        #expect(lstat(logs + "/2026-09-03/link", &info) != 0)
+        #expect(mode(outside + "/secret") == 0o600)
+        #expect(try String(contentsOfFile: outside + "/secret", encoding: .utf8) == "s")
+    }
+
+    @Test("Root locks the tree to root:wheel", .enabled(if: geteuid() == 0))
+    func rootOwnsTheTree() throws {
+        let base = scratch()
+        let logs = base + "/Managed State/logs"
+        try FileManager.default.createDirectory(atPath: logs + "/2026-09-03", withIntermediateDirectories: true)
+        chown(logs + "/2026-09-03", 4_294_967_294, 4_294_967_294)
+        #expect(prepareManagedLogDirectory(logs, ownedComponents: 2, trustedOwners: [0, geteuid()]))
+        var info = stat()
+        #expect(lstat(logs + "/2026-09-03", &info) == 0)
+        #expect(info.st_uid == 0 && info.st_gid == 0)
     }
 }

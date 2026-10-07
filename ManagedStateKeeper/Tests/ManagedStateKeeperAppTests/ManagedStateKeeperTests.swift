@@ -77,6 +77,31 @@ import ManagedStateKeeperXPC
         #expect(sessions.first?.path.hasSuffix("091402_2/outset.log") == true)
     }
 
+    @Test func listsRootAndUserSessionsLabelledBySource() throws {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent("msk-\(UUID().uuidString)").path
+        defer { try? fm.removeItem(atPath: base) }
+        let system = base + "/system", user = base + "/user"
+        for path in [system + "/2026-10-06/091402/outset.log", user + "/2026-10-06/091402/outset.log",
+                     user + "/2026-10-07/080000/outset.log"] {
+            try fm.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try "x".write(toFile: path, atomically: true, encoding: .utf8)
+        }
+
+        let sessions = LogSessionStore.sessions(system: system, user: user)
+        #expect(sessions.map(\.id) == ["user:2026-10-07-080000", "user:2026-10-06-091402", "system:2026-10-06-091402"]
+            || sessions.map(\.id) == ["user:2026-10-07-080000", "system:2026-10-06-091402", "user:2026-10-06-091402"])
+        #expect(Set(sessions.map(\.id)).count == 3)
+        #expect(sessions.filter { $0.source == .system }.map(\.path) == [system + "/2026-10-06/091402/outset.log"])
+        #expect(sessions.filter { $0.source == .user }.count == 2)
+        #expect(LogSource.system.label != LogSource.user.label)
+    }
+
+    @Test func userLogsLiveUnderTheUsersLibrary() {
+        #expect(StateKeeperConstants.userLogsDirectory(home: "/Users/someone") == "/Users/someone/Library/Logs/Managed State")
+        #expect(StateKeeperConstants.logsDirectory == "/Library/Managed State/logs")
+    }
+
     @Test func missingRootListsNothing() {
         #expect(LogSessionStore.sessions(in: "/nonexistent/\(UUID().uuidString)").isEmpty)
     }

@@ -2,14 +2,28 @@
 //  LogSessionStore.swift
 //  Managed State Keeper
 //
-//  Lists outset's runs under /Library/Managed State/logs. Each run is a session
-//  directory, YYYY-MM-DD/HHMMSS/ (HHMMSS_2 … _9 when two runs start in the same
-//  second), holding outset.log beside events.jsonl and session.json. The shared
-//  flat outset.log and its rotations at the root predate that layout and are
-//  still listed.
+//  Lists outset's runs from two roots: root runs under /Library/Managed State/logs
+//  and this user's runs (login-every, login-once, on-demand) under
+//  ~/Library/Logs/Managed State. Each run is a session directory, YYYY-MM-DD/HHMMSS/
+//  (HHMMSS_2 … _9 when two runs start in the same second), holding outset.log
+//  beside events.jsonl and session.json. A flat outset.log and its rotations at
+//  a root predate that layout and are still listed.
 //
 
 import Foundation
+
+/// Which root a session came from.
+enum LogSource: String, CaseIterable, Sendable {
+    case system
+    case user
+
+    var label: String {
+        switch self {
+        case .system: "System (root)"
+        case .user: "This user"
+        }
+    }
+}
 
 struct LogSession: Identifiable, Hashable, Sendable {
     let id: String
@@ -17,6 +31,7 @@ struct LogSession: Identifiable, Hashable, Sendable {
     let path: String
     let date: Date?
     let size: Int64
+    var source: LogSource = .system
 
     var displayDate: String {
         guard let date else { return name }
@@ -57,8 +72,17 @@ enum LogSessionStore {
             ?? stampFormatter("yyyy-MM-dd-HHmm").date(from: base)
     }
 
+    /// Root runs from `system` and this user's runs from `user`, each labelled
+    /// with its source, newest first.
+    static func sessions(system: String, user: String, fileManager fm: FileManager = .default) -> [LogSession] {
+        let merged = sessions(in: system, source: .system, fileManager: fm)
+            + sessions(in: user, source: .user, fileManager: fm)
+        return sortedNewestFirst(merged)
+    }
+
     /// Every run under `root`, newest first.
-    static func sessions(in root: String, fileManager fm: FileManager = .default) -> [LogSession] {
+    static func sessions(in root: String, source: LogSource = .system,
+                         fileManager fm: FileManager = .default) -> [LogSession] {
         guard let entries = try? fm.contentsOfDirectory(atPath: root) else { return [] }
 
         var found: [LogSession] = []
@@ -75,11 +99,12 @@ enum LogSessionStore {
                 let stamp = "\(day)-\(session)"
                 let path = (sessionPath as NSString).appendingPathComponent(log)
                 found.append(LogSession(
-                    id: stamp,
+                    id: "\(source.rawValue):\(stamp)",
                     name: stamp,
                     path: path,
                     date: parseStamp(stamp),
-                    size: fileSize(path, fm)
+                    size: fileSize(path, fm),
+                    source: source
                 ))
             }
         }
@@ -92,15 +117,20 @@ enum LogSessionStore {
             guard fm.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue else { continue }
             let modified = (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date
             found.append(LogSession(
-                id: name,
+                id: "\(source.rawValue):\(name)",
                 name: name,
                 path: path,
                 date: parseStamp(name.replacingOccurrences(of: ".log", with: "")) ?? modified,
-                size: fileSize(path, fm)
+                size: fileSize(path, fm),
+                source: source
             ))
         }
 
-        return found.sorted {
+        return sortedNewestFirst(found)
+    }
+
+    private static func sortedNewestFirst(_ found: [LogSession]) -> [LogSession] {
+        found.sorted {
             let lhs = $0.date ?? .distantPast
             let rhs = $1.date ?? .distantPast
             return lhs == rhs ? $0.name > $1.name : lhs > rhs

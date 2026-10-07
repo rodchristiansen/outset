@@ -16,15 +16,29 @@ APP_ROOT="${APP_PATH}/Contents"
 # register the app bundle
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister "${APP_PATH}"
 
-# the managed log directory is shared by root and user contexts: world-writable
-# with the sticky bit, and any log already there is widened so both can append
-MANAGED_LOG_DIR="/Library/Managed State/logs"
-/usr/bin/install -d -m 1777 -o root -g wheel "${MANAGED_LOG_DIR}"
-/bin/chmod 1777 "${MANAGED_LOG_DIR}"
+# The managed log directory belongs to root alone: root:wheel 0755, files 0644.
+# User-context runs log to ~/Library/Logs/Managed State instead. A symlink or
+# anything other than a real folder at either level is refused, not followed.
+# Builds before this one made the folder world-writable (1777) and its files
+# 0666; the --boot run below resets everything inside it to root's and drops
+# any symlink or hard link it finds there.
+MANAGED_STATE_DIR="/Library/Managed State"
+MANAGED_LOG_DIR="${MANAGED_STATE_DIR}/logs"
+managed_log_dir_ok=1
+for dir in "${MANAGED_STATE_DIR}" "${MANAGED_LOG_DIR}"; do
+    if [ -L "${dir}" ] || { [ -e "${dir}" ] && [ ! -d "${dir}" ]; }; then
+        echo "Refusing ${dir}: it is not a real folder. Root logs stay off it."
+        managed_log_dir_ok=0
+        break
+    fi
+    /bin/mkdir -p -m 755 "${dir}"
+    /usr/sbin/chown -h root:wheel "${dir}"
+    /bin/chmod -h 755 "${dir}"
+done
 
 # move any existing log history from the previous log location into the managed log directory
 LEGACY_LOG_DIR="/usr/local/outset/logs"
-if [ -d "${LEGACY_LOG_DIR}" ]; then
+if [ ${managed_log_dir_ok} -eq 1 ] && [ -d "${LEGACY_LOG_DIR}" ] && [ ! -L "${LEGACY_LOG_DIR}" ]; then
     for logfile in "${LEGACY_LOG_DIR}"/outset.log*(N); do
         if [ ! -e "${MANAGED_LOG_DIR}/${logfile:t}" ]; then
             /bin/mv "${logfile}" "${MANAGED_LOG_DIR}/"
@@ -32,9 +46,9 @@ if [ -d "${LEGACY_LOG_DIR}" ]; then
     done
     /bin/rmdir "${LEGACY_LOG_DIR}" 2>/dev/null
 fi
-/bin/chmod 666 "${MANAGED_LOG_DIR}"/outset.log*(N) 2>/dev/null
 
-# run boot argument - creates necessary paths and folders
+# run boot argument - creates necessary paths and folders, and as root locks
+# the managed log directory and everything in it
 "${APP_PATH}/Contents/MacOS/Outset" --boot
 
 ### Commented out for now until issues with SMAppService are sorted

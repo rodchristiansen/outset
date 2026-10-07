@@ -54,40 +54,135 @@ func formatLogFileLine(_ message: String, logLevel: OSLogType, date: Date = Date
     return "[\(timestamp)] \(level) \(message)"
 }
 
-/// Creates the managed log directory root:wheel mode 1777 when it is missing and
-/// restores that mode if it drifted. Root only; a no-op in user context.
-func ensureManagedLogDirectory() {
-    guard getuid() == 0 else { return }
-    var info = stat()
-    if lstat(managedLogDirectory, &info) == 0 {
-        if (info.st_mode & S_IFMT) == S_IFDIR, info.st_uid == 0, (info.st_mode & 0o7777) != managedLogDirectoryMode {
-            chmod(managedLogDirectory, managedLogDirectoryMode)
-        }
-        return
-    }
-    let parent = (managedLogDirectory as NSString).deletingLastPathComponent
-    try? FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true,
-                                             attributes: [FileAttributeKey.posixPermissions: 0o755])
-    if mkdir(managedLogDirectory, managedLogDirectoryMode) == 0 {
-        chown(managedLogDirectory, 0, 0)
-        chmod(managedLogDirectory, managedLogDirectoryMode)
-    }
+// MARK: - Log locations
+
+/// The per-user log root under `home`: ~/Library/Logs/Managed State.
+func userLogDirectoryPath(home: String) -> String {
+    return (home as NSString).appendingPathComponent(userLogSubpath)
 }
 
-/// True when the managed log directory exists (root creates it first) and this
-/// process may create files in it.
-func managedLogDirectoryIsWritable() -> Bool {
-    ensureManagedLogDirectory()
-    var info = stat()
-    guard stat(managedLogDirectory, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR else { return false }
-    return access(managedLogDirectory, W_OK | X_OK) == 0
+/// Where this run logs. Root logs under the managed directory once it is locked;
+/// every other context, and root when the managed directory cannot be trusted,
+/// logs under its own home.
+func resolveLogDirectory(isRoot: Bool, managedReady: Bool, userDirectory: String) -> String {
+    return isRoot && managedReady ? managedLogDirectory : userDirectory
+}
+
+/// True when `path` is the managed log directory or inside it.
+func isInsideManagedLogDirectory(_ path: String, root: String = managedLogDirectory) -> Bool {
+    return path == root || path.hasPrefix(root + "/")
+}
+
+/// Prepared once per root process: the managed log directory exists, its chain
+/// is trusted, and everything inside it is root's. Never evaluated in user context.
+let managedLogDirectoryIsReady: Bool = {
+    guard geteuid() == 0 else { return false }
+    return prepareManagedLogDirectory()
+}()
+
+/// Root only. Locks the managed log directory and resets anything a
+/// world-writable layout left inside it, then reports whether root may log there.
+@discardableResult
+func prepareManagedLogDirectory(_ path: String = managedLogDirectory,
+                                ownedComponents: Int = managedLogOwnedComponents,
+                                trustedOwners: Set<uid_t> = [0],
+                                owner: uid_t = 0, group: gid_t = 0) -> Bool {
+    let descriptor = openLockedLogDirectory(path, ownedComponents: ownedComponents,
+                                            trustedOwners: trustedOwners, owner: owner, group: group)
+    guard descriptor >= 0 else {
+        printStdErr("ERROR: \(path) or a folder above it is a symlink or writable by others; not logging there")
+        return false
+    }
+    defer { close(descriptor) }
+    lockLogTree(descriptor, depth: 3, owner: owner, group: group)
+    return true
+}
+
+/// Opens `path` one component at a time from "/", never following a symlink.
+/// Folders above the last `ownedComponents` must be owned by a trusted owner and
+/// writable by no group or other. The owned folders are created when missing and
+/// set to `owner`:`group` mode 0755. Returns the final folder's descriptor, or -1
+/// when any component is a symlink, not a folder, or not trusted.
+func openLockedLogDirectory(_ path: String, ownedComponents: Int,
+                            trustedOwners: Set<uid_t> = [0],
+                            owner: uid_t = 0, group: gid_t = 0) -> Int32 {
+    guard path.hasPrefix("/") else { return -1 }
+    let components = path.split(separator: "/").map(String.init)
+    guard !components.contains(".."), !components.contains("."), ownedComponents <= components.count else { return -1 }
+    var current = open("/", O_RDONLY | O_DIRECTORY)
+    guard current >= 0 else { return -1 }
+
+    func isLocked(_ descriptor: Int32) -> Bool {
+        var info = stat()
+        return fstat(descriptor, &info) == 0 && (info.st_mode & S_IFMT) == S_IFDIR
+            && trustedOwners.contains(info.st_uid) && info.st_mode & (S_IWGRP | S_IWOTH) == 0
+    }
+
+    guard isLocked(current) else { close(current); return -1 }
+    for (index, component) in components.enumerated() {
+        let owned = index >= components.count - ownedComponents
+        if owned {
+            _ = mkdirat(current, component, managedLogDirectoryMode)
+        }
+        // O_NOFOLLOW makes a symlink fail here rather than be walked through.
+        let next = openat(current, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        close(current)
+        guard next >= 0 else { return -1 }
+        current = next
+        if owned {
+            guard fchown(current, owner, group) == 0, fchmod(current, managedLogDirectoryMode) == 0 else {
+                close(current)
+                return -1
+            }
+        }
+        guard isLocked(current) else { close(current); return -1 }
+    }
+    return current
+}
+
+/// Resets everything under the folder open at `directory` to root's: folders
+/// `owner`:`group` 0755, files 0644. A folder is locked before its entries are
+/// read, so no other account can add or swap an entry while the walk runs. A
+/// symlink, a hard-linked file (which could share its inode with a file
+/// elsewhere), or anything that is neither file nor folder is unlinked, never
+/// followed or re-moded. Folders deeper than `depth` are left as they are.
+func lockLogTree(_ directory: Int32, depth: Int, owner: uid_t = 0, group: gid_t = 0) {
+    for name in OutsetSession.directoryEntryNames(directory) {
+        var info = stat()
+        guard fstatat(directory, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { continue }
+        switch info.st_mode & S_IFMT {
+        case S_IFDIR:
+            guard depth > 0 else { continue }
+            let child = openat(directory, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+            guard child >= 0 else { continue }
+            if fchown(child, owner, group) == 0, fchmod(child, managedLogDirectoryMode) == 0 {
+                lockLogTree(child, depth: depth - 1, owner: owner, group: group)
+            }
+            close(child)
+        case S_IFREG:
+            let file = openat(directory, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+            guard file >= 0 else { continue }
+            var opened = stat()
+            if fstat(file, &opened) == 0, (opened.st_mode & S_IFMT) == S_IFREG, opened.st_nlink == 1 {
+                _ = fchown(file, owner, group)
+                _ = fchmod(file, managedLogFileMode)
+                close(file)
+            } else {
+                close(file)
+                unlinkat(directory, name, 0)
+            }
+        default:
+            unlinkat(directory, name, 0)
+        }
+    }
 }
 
 /// Creates the directory holding `path` if it is missing. Returns `false` if it could not be created.
+/// The managed log directory is root's alone: any other context is refused there.
 func ensureLogDirectory(for path: String = logFilePath) -> Bool {
     let directory = (path as NSString).deletingLastPathComponent
-    if directory == managedLogDirectory {
-        ensureManagedLogDirectory()
+    if isInsideManagedLogDirectory(directory) {
+        guard geteuid() == 0, managedLogDirectoryIsReady else { return false }
         return checkDirectoryExists(path: directory)
     }
     if checkDirectoryExists(path: directory) {
@@ -105,8 +200,8 @@ func ensureLogDirectory(for path: String = logFilePath) -> Bool {
 }
 
 /// Opens `path` for appending without following a symlink, refuses anything that
-/// is not a regular file with one link, and widens a file this process owns to
-/// mode 0666 so the other context can append too. Returns `nil` on failure.
+/// is not a regular file with one link, and sets a file this process owns to
+/// mode 0644. Returns `nil` on failure.
 func openLogFile(_ path: String) -> Int32? {
     let descriptor = open(path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW, managedLogFileMode)
     guard descriptor >= 0 else { return nil }
