@@ -18,7 +18,7 @@ jobs:
         working-directory: ManagedStateKeeper
     steps:
       - uses: actions/checkout@v4
-      - name: Test and build unsigned package
+      - name: Test and build the app bundle
         run: |
           set -euo pipefail
           # Link against a macOS 26 SDK, as BootstrapMate's release does, so the
@@ -27,4 +27,5 @@ jobs:
           if [ -n "$XCODE" ]; then export DEVELOPER_DIR="$XCODE/Contents/Developer"; fi
           xcrun --show-sdk-version
           swift test
-          make pkg
+          # The bundle ships inside the outset package; there is no package of its own.
+          make app

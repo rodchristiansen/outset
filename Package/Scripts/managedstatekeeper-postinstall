@@ -1,0 +1,78 @@
+#!/bin/zsh --no-rcs
+# Managed State Keeper postinstall, called from the outset postinstall with the
+# installer's arguments. Installs the privileged helper as a system LaunchDaemon,
+# so the window can run outset and write its preferences with no Login Items
+# approval. A package built without the window skips this step.
+
+LOG="/private/tmp/managedstatekeeper-postinstall.log"
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "${LOG}"
+}
+
+TARGET="${3:-/}"
+TARGET="${TARGET%/}"
+APP_PATH="${TARGET}/Applications/Utilities/Managed State Keeper.app"
+LABEL="io.macadmins.Outset.helper"
+HELPER_LD_PATH="${APP_PATH}/Contents/Library/LaunchDaemons/${LABEL}.plist"
+HELPER_SYSTEM_PLIST="${TARGET}/Library/LaunchDaemons/${LABEL}.plist"
+# launchd runs the helper from the boot volume.
+HELPER_BINARY="/Applications/Utilities/Managed State Keeper.app/Contents/MacOS/ManagedStateKeeperHelper"
+# The window used to ship as its own package; its files now belong to this one.
+LEGACY_PKG_ID="io.macadmins.Outset.gui"
+MINIMUM_MACOS=14
+
+if [[ ! -d "${APP_PATH}" ]]; then
+    exit 0
+fi
+
+log "=== Managed State Keeper postinstall started ==="
+
+# Forget the old separate package's receipt, so removing that package by its
+# receipt cannot delete the window this package now installs.
+if /usr/sbin/pkgutil --volume "${TARGET:-/}" --pkg-info "${LEGACY_PKG_ID}" >/dev/null 2>&1; then
+    /usr/sbin/pkgutil --volume "${TARGET:-/}" --forget "${LEGACY_PKG_ID}" >/dev/null 2>&1 \
+        && log "Forgot legacy receipt ${LEGACY_PKG_ID}"
+fi
+
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister "${APP_PATH}" 2>/dev/null
+
+# outset runs on older systems than the window. Below its minimum, leave the
+# helper unloaded rather than have launchd relaunch a binary that cannot start.
+MAJOR=$(/usr/bin/sw_vers -productVersion | cut -d. -f1)
+if (( MAJOR < MINIMUM_MACOS )); then
+    log "macOS ${MAJOR} is older than ${MINIMUM_MACOS}: helper not installed"
+    if [[ "${TARGET:-/}" == "/" ]]; then
+        /bin/launchctl bootout "system/${LABEL}" 2>/dev/null
+    fi
+    /bin/rm -f "${HELPER_SYSTEM_PLIST}"
+    exit 0
+fi
+
+if [[ ! -f "${HELPER_LD_PATH}" ]]; then
+    log "ERROR: helper LaunchDaemon plist not found: ${HELPER_LD_PATH}"
+    exit 1
+fi
+
+# The bundle's plist uses BundleProgram, which only SMAppService understands;
+# the system copy gets ProgramArguments instead.
+/bin/cp "${HELPER_LD_PATH}" "${HELPER_SYSTEM_PLIST}"
+/usr/libexec/PlistBuddy -c "Delete :BundleProgram" "${HELPER_SYSTEM_PLIST}" 2>/dev/null
+/usr/libexec/PlistBuddy -c "Add :ProgramArguments array" "${HELPER_SYSTEM_PLIST}" 2>/dev/null
+/usr/libexec/PlistBuddy -c "Add :ProgramArguments:0 string ${HELPER_BINARY}" "${HELPER_SYSTEM_PLIST}"
+/bin/chmod 644 "${HELPER_SYSTEM_PLIST}"
+/usr/sbin/chown root:wheel "${HELPER_SYSTEM_PLIST}"
+
+if [[ "${TARGET:-/}" != "/" ]]; then
+    log "Installed to ${TARGET}; the helper loads at that volume's next start-up"
+    exit 0
+fi
+
+/bin/launchctl bootout "system/${LABEL}" 2>/dev/null
+if output=$(/bin/launchctl bootstrap system "${HELPER_SYSTEM_PLIST}" 2>&1); then
+    log "Helper loaded: ${LABEL}"
+else
+    log "WARNING: launchctl bootstrap failed for ${LABEL}: ${output}"
+fi
+
+log "=== Managed State Keeper postinstall completed ==="
+exit 0

@@ -75,3 +75,12 @@ for agent in ${AGENTS}; do
     cp "${APP_ROOT}/${agent}" "${LA_ROOT}"
     echo ${agent}
 done
+
+# Managed State Keeper ships in this package: install its privileged helper.
+# A failure there is logged but leaves the outset install itself successful.
+MSK_POSTINSTALL="${0:A:h}/managedstatekeeper-postinstall"
+if [ -x "${MSK_POSTINSTALL}" ]; then
+    "${MSK_POSTINSTALL}" "$@" || echo "Managed State Keeper helper setup failed; see /private/tmp/managedstatekeeper-postinstall.log"
+fi
+
+exit 0
