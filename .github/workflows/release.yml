@@ -33,30 +33,10 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" build/Build/Products/Release/Outset.app/Contents/Info.plist \
             | grep -qx "$VERSION"
 
-      - name: Build unsigned package
+      - name: Build Managed State Keeper.app (unsigned)
+        working-directory: ManagedStateKeeper
         env:
           VERSION: ${{ steps.ver.outputs.VERSION }}
-        run: |
-          set -euo pipefail
-          payload="$PWD/pkg/payload"
-          rm -rf "$PWD/pkg" artifacts && mkdir -p "$payload" artifacts
-          cp -R build/Build/Products/Release/Outset.app "$payload/Outset.app"
-          cp Package/outset "$payload/outset"
-          chmod a+x "$payload/outset"
-          # Install the app even over a newer bundle, so a rollback also lands.
-          pkgbuild --analyze --root "$payload" "$PWD/pkg/component.plist"
-          plutil -replace 0.BundleIsVersionChecked -bool NO "$PWD/pkg/component.plist"
-          plutil -replace 0.BundleIsRelocatable -bool NO "$PWD/pkg/component.plist"
-          pkgbuild --root "$payload" --component-plist "$PWD/pkg/component.plist" --scripts Package/Scripts \
-            --identifier io.macadmins.Outset \
-            --version "$VERSION" --install-location /usr/local/outset "artifacts/Outset-component.pkg"
-          productbuild --package "artifacts/Outset-component.pkg" --identifier io.macadmins.Outset \
-            --version "$VERSION" "artifacts/Outset-${VERSION}.pkg"
-          rm -f artifacts/Outset-component.pkg
-          shasum -a 256 "artifacts/Outset-${VERSION}.pkg" > "artifacts/Outset-${VERSION}.pkg.sha256"
-
-      - name: Build unsigned Managed State Keeper package
-        working-directory: ManagedStateKeeper
         run: |
           set -euo pipefail
           # Link against a macOS 26 SDK, as BootstrapMate's release does, so the
@@ -64,18 +44,29 @@ jobs:
           XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -n "$XCODE" ]; then export DEVELOPER_DIR="$XCODE/Contents/Developer"; fi
           xcrun --show-sdk-version
-          GUI_VERSION=$(date -u '+%Y.%m.%d.%H%M')
-          make pkg VERSION="$GUI_VERSION"
-          cp "build/ManagedStateKeeper-${GUI_VERSION}.pkg" ../artifacts/
-          cd ../artifacts && shasum -a 256 "ManagedStateKeeper-${GUI_VERSION}.pkg" > "ManagedStateKeeper-${GUI_VERSION}.pkg.sha256"
+          make app VERSION="$VERSION"
+
+      # One package carries outset and its window, so every Mac that gets
+      # outset also gets Managed State Keeper and its helper.
+      - name: Build unsigned package
+        env:
+          VERSION: ${{ steps.ver.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          rm -rf artifacts
+          Package/buildReleasePackage.zsh "$VERSION" \
+            build/Build/Products/Release/Outset.app \
+            "ManagedStateKeeper/build/pkg-root/Applications/Utilities/Managed State Keeper.app" \
+            artifacts
+          pkgutil --payload-files "artifacts/Outset-${VERSION}.pkg" \
+            | grep -x "./Applications/Utilities/Managed State Keeper.app/Contents/MacOS/ManagedStateKeeperHelper" >/dev/null
+          shasum -a 256 "artifacts/Outset-${VERSION}.pkg" > "artifacts/Outset-${VERSION}.pkg.sha256"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           name: Outset ${{ steps.ver.outputs.VERSION }}
-          body: Unsigned packages built from this tag, outset and the Managed State Keeper window. Sign and notarize them with your own Developer ID before deployment; the Managed State Keeper helper refuses every client until it is signed.
+          body: Unsigned package built from this tag. It installs outset and the Managed State Keeper window with its helper. Sign and notarize it with your own Developer ID before deployment; the Managed State Keeper helper refuses every client until it is signed.
           files: |
             artifacts/Outset-${{ steps.ver.outputs.VERSION }}.pkg
             artifacts/Outset-${{ steps.ver.outputs.VERSION }}.pkg.sha256
-            artifacts/ManagedStateKeeper-*.pkg
-            artifacts/ManagedStateKeeper-*.pkg.sha256
