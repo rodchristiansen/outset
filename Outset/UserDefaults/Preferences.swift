@@ -44,6 +44,11 @@ func writeOutsetPreferences(prefs: OutsetPreferences) {
         let key = propertyName.camelCaseToUnderscored()
 
         if isRoot {
+            // A profile owns a managed key; copying it into /Library/Preferences
+            // would leave it behind after the profile is removed.
+            if preferenceIsManaged(key) { continue }
+            // A nil optional has no property-list value; leave the key unset.
+            if let optional = child.value as? OptionalProtocol, optional.isNil { continue }
             CFPreferencesSetValue(
                 key as CFString,
                 child.value as CFPropertyList,
@@ -75,38 +80,97 @@ func loadOutsetPreferences() -> OutsetPreferences {
     var outsetPrefs = OutsetPreferences()
 
     if isRoot {
-        // force preferences to be read from /Library/Preferences instead of root's preferences
-        outsetPrefs.networkTimeout = CFPreferencesCopyValue("network_timeout" as CFString, Bundle.main.bundleIdentifier! as CFString, kCFPreferencesAnyUser, kCFPreferencesAnyHost) as? Int ?? 180
-        outsetPrefs.ignoredUsers = CFPreferencesCopyValue("ignored_users" as CFString, Bundle.main.bundleIdentifier! as CFString, kCFPreferencesAnyUser, kCFPreferencesAnyHost) as? [String] ?? []
-        outsetPrefs.overrideLoginOnce = CFPreferencesCopyValue("override_login_once" as CFString, Bundle.main.bundleIdentifier! as CFString, kCFPreferencesAnyUser, kCFPreferencesAnyHost) as? RunOnce ?? [:]
-        outsetPrefs.waitForNetwork = (CFPreferencesCopyValue("wait_for_network" as CFString, Bundle.main.bundleIdentifier! as CFString, kCFPreferencesAnyUser, kCFPreferencesAnyHost) != nil)
-        outsetPrefs.backgroundScriptTimeout = CFPreferencesCopyValue("background_script_timeout" as CFString, Bundle.main.bundleIdentifier! as CFString, kCFPreferencesAnyUser, kCFPreferencesAnyHost) as? Int
+        // A configuration profile wins; otherwise /Library/Preferences, never
+        // root's own preference file; otherwise the default.
+        outsetPrefs.networkTimeout = intPreference(rootPreferenceValue("network_timeout")) ?? 180
+        outsetPrefs.ignoredUsers = rootPreferenceValue("ignored_users") as? [String] ?? []
+        outsetPrefs.overrideLoginOnce = rootPreferenceValue("override_login_once") as? RunOnce ?? [:]
+        outsetPrefs.waitForNetwork = boolPreference(rootPreferenceValue("wait_for_network")) ?? false
+        outsetPrefs.backgroundScriptTimeout = intPreference(rootPreferenceValue("background_script_timeout"))
         // manifest_signing_key is only honoured when MDM-managed (forced). A locally
         // written key could be used to disable script processing without detection,
         // so we ignore it unless it comes from a managed profile. In debug mode a
         // local value is accepted to allow workflow testing without an MDM enrolment.
-        let appBundle = Bundle.main.bundleIdentifier! as CFString
-        let signingKeyManaged = CFPreferencesAppValueIsForced("manifest_signing_key" as CFString, appBundle)
+        let signingKeyManaged = preferenceIsManaged("manifest_signing_key")
+        // An empty key is no key: it would otherwise require a signature that
+        // nothing can satisfy and skip every script.
+        let signingKey = nonEmpty(rootPreferenceValue("manifest_signing_key") as? String)
         if signingKeyManaged || debugMode {
-            outsetPrefs.manifestSigningKey = CFPreferencesCopyValue("manifest_signing_key" as CFString, appBundle, kCFPreferencesAnyUser, kCFPreferencesAnyHost) as? String
+            outsetPrefs.manifestSigningKey = signingKey
             if !signingKeyManaged {
                 writeLog("manifest_signing_key is not MDM-managed — accepted in debug mode only", logLevel: .debug)
             }
-        } else if CFPreferencesCopyValue("manifest_signing_key" as CFString, appBundle, kCFPreferencesAnyUser, kCFPreferencesAnyHost) != nil {
+        } else if signingKey != nil {
             writeLog("manifest_signing_key is present but not MDM-managed — ignoring to prevent tampering", logLevel: .error)
         }
     } else {
         // load preferences for the current user, which includes /Library/Preferences
-        outsetPrefs.networkTimeout = defaults.integer(forKey: "network_timeout")
+        outsetPrefs.networkTimeout = intPreference(defaults.object(forKey: "network_timeout")) ?? 180
         outsetPrefs.ignoredUsers = defaults.array(forKey: "ignored_users") as? [String] ?? []
         outsetPrefs.overrideLoginOnce = defaults.object(forKey: "override_login_once") as? RunOnce ?? [:]
-        outsetPrefs.waitForNetwork = defaults.bool(forKey: "wait_for_network")
+        outsetPrefs.waitForNetwork = boolPreference(defaults.object(forKey: "wait_for_network")) ?? false
         if defaults.object(forKey: "background_script_timeout") != nil {
             outsetPrefs.backgroundScriptTimeout = defaults.integer(forKey: "background_script_timeout")
         }
-        outsetPrefs.manifestSigningKey = defaults.string(forKey: "manifest_signing_key")
+        outsetPrefs.manifestSigningKey = nonEmpty(defaults.string(forKey: "manifest_signing_key"))
     }
     return outsetPrefs
+}
+
+/// Lets the writer skip nil optionals without knowing their wrapped type.
+protocol OptionalProtocol { var isNil: Bool { get } }
+extension Optional: OptionalProtocol { var isNil: Bool { self == nil } }
+
+/// Whether a configuration profile sets this outset key.
+func preferenceIsManaged(_ key: String) -> Bool {
+    CFPreferencesAppValueIsForced(key as CFString, Bundle.main.bundleIdentifier! as CFString)
+}
+
+/// The value a root run uses: the profile's value when the key is managed,
+/// otherwise /Library/Preferences. Root's own preference file is never read.
+func rootPreferenceValue(_ key: String) -> Any? {
+    resolvePreferenceValue(
+        isManaged: preferenceIsManaged(key),
+        managedValue: { CFPreferencesCopyAppValue(key as CFString, Bundle.main.bundleIdentifier! as CFString) },
+        systemValue: { CFPreferencesCopyValue(key as CFString, Bundle.main.bundleIdentifier! as CFString, kCFPreferencesAnyUser, kCFPreferencesAnyHost) }
+    )
+}
+
+/// Profile first, then the system-wide file, then nothing (the caller's default).
+func resolvePreferenceValue(isManaged: Bool, managedValue: () -> Any?, systemValue: () -> Any?) -> Any? {
+    if isManaged, let value = managedValue() { return value }
+    return systemValue()
+}
+
+func nonEmpty(_ string: String?) -> String? {
+    guard let string, !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+    return string
+}
+
+/// Reads a preference as a boolean from a bool, a number or a string such as
+/// "true" or "0". Nil when the key is absent or the value is not a boolean.
+func boolPreference(_ value: Any?) -> Bool? {
+    switch value {
+    case let bool as Bool: return bool
+    case let number as NSNumber: return number.boolValue
+    case let string as String:
+        switch string.lowercased().trimmingCharacters(in: .whitespaces) {
+        case "true", "yes", "1": return true
+        case "false", "no", "0": return false
+        default: return nil
+        }
+    default: return nil
+    }
+}
+
+/// Reads a preference as an integer from a number or a numeric string.
+func intPreference(_ value: Any?) -> Int? {
+    switch value {
+    case let int as Int: return int
+    case let number as NSNumber: return number.intValue
+    case let string as String: return Int(string.trimmingCharacters(in: .whitespaces))
+    default: return nil
+    }
 }
 
 func loadRunOncePlist(bootOnce: Bool = false) -> RunOnce {
