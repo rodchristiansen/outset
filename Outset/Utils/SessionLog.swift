@@ -4,17 +4,18 @@
 //
 //  The structured half of a run's logs.
 //
-//  Every invocation owns a session directory under the log root,
-//      /Library/Managed State/logs/YYYY-MM-DD/HHMMSS/
+//  Every invocation owns a session directory under its log root,
+//      /Library/Managed State/logs/YYYY-MM-DD/HHMMSS/          (root runs)
+//      ~/Library/Logs/Managed State/YYYY-MM-DD/HHMMSS/         (user-context runs)
 //  holding outset.log (the human log), events.jsonl (one JSON record per line,
 //  appended as the run proceeds) and session.json (the run as a whole, written
 //  when it starts and rewritten when it ends). The layout and field names match
 //  StartSet's session logger on Windows and the managed-software tools on both
 //  platforms, so the same readers work everywhere.
 //
-//  The log root is shared between root and user contexts, so a day directory is
-//  created world-writable and sticky the way the root itself is; each context
-//  then owns the session directories it creates inside it.
+//  Each log root belongs to one account: root's is root:wheel 0755 and a user's
+//  is that user's, so day and session directories are created 0755 and files
+//  0644, and nothing in either root is writable by another account.
 //
 
 import Foundation
@@ -104,7 +105,13 @@ final class OutsetSession {
         let day = OutsetSession.formatter("yyyy-MM-dd").string(from: start)
         let time = OutsetSession.formatter("HHmmss").string(from: start)
         let dayDir = (logsDirectory as NSString).appendingPathComponent(day)
-        guard OutsetSession.makeSharedDirectory(dayDir) else { return nil }
+        // A user's log root is created on its first run; the managed one is root's
+        // to create, and prepareManagedLogDirectory has already done so.
+        if !isInsideManagedLogDirectory(logsDirectory), !checkDirectoryExists(path: logsDirectory) {
+            try? FileManager.default.createDirectory(atPath: logsDirectory, withIntermediateDirectories: true,
+                                                     attributes: [FileAttributeKey.posixPermissions: 0o755])
+        }
+        guard OutsetSession.makeDayDirectory(dayDir) else { return nil }
 
         let fm = FileManager.default
         var chosenDir = (dayDir as NSString).appendingPathComponent(time)
@@ -182,7 +189,8 @@ final class OutsetSession {
         )
         guard let data = try? OutsetSession.sessionEncoder.encode(record) else { return }
         let path = (sessionDir as NSString).appendingPathComponent("session.json")
-        try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        guard (try? data.write(to: URL(fileURLWithPath: path), options: .atomic)) != nil else { return }
+        chmod(path, managedLogFileMode)
     }
 
     // MARK: - Retention
@@ -190,8 +198,7 @@ final class OutsetSession {
     /// Removes day directories older than the retention window, then the oldest
     /// session directories beyond the cap, then entries root set aside, then
     /// the flat log and its rotated generations left at the root by the layout
-    /// this replaced. Every removal is best-effort: in the shared sticky
-    /// directory another context's files are not this process's to delete.
+    /// this replaced. Every removal is best-effort.
     ///
     /// Nothing here deletes recursively or follows a link. Every step works
     /// relative to a directory opened with O_NOFOLLOW, so an entry swapped for
@@ -249,18 +256,16 @@ final class OutsetSession {
 
     // MARK: - Helpers
 
-    /// Creates a day directory inside the shared log root world-writable and
-    /// sticky, the way the root itself is, so a run in either context can place
-    /// its own session directory in it. Returns true when the directory exists,
-    /// is trusted, and this process may create entries in it.
+    /// Creates a day directory, mode 0755, inside the log root. Returns true
+    /// when the directory exists, is trusted, and this process may create
+    /// entries in it.
     ///
-    /// Any account can create entries in the log root, so an existing entry is
-    /// read with lstat and never followed, and its mode is never changed: only a
-    /// directory this process just created gets chmod. An existing directory is
-    /// trusted only when owned by root or by this process. A root run that finds
-    /// anything else under the day's name renames it aside and creates its own,
-    /// so root records stay in the collected location.
-    static func makeSharedDirectory(_ path: String) -> Bool {
+    /// An existing entry is read with lstat and never followed, and its mode is
+    /// never changed: only a directory this process just created gets chmod. An
+    /// existing directory is trusted only when owned by root or by this process.
+    /// A root run that finds anything else under the day's name renames it aside
+    /// and creates its own, so root records stay in the collected location.
+    static func makeDayDirectory(_ path: String) -> Bool {
         var info = stat()
         if lstat(path, &info) == 0 {
             let trusted = (info.st_mode & S_IFMT) == S_IFDIR && (info.st_uid == 0 || info.st_uid == geteuid())
@@ -268,7 +273,6 @@ final class OutsetSession {
             guard geteuid() == 0, setAside(path) else { return false }
         }
         guard mkdir(path, managedLogDirectoryMode) == 0 else { return false }
-        // The sticky log root stops other accounts renaming what this process just made.
         chmod(path, managedLogDirectoryMode)
         return access(path, W_OK | X_OK) == 0
     }

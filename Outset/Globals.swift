@@ -27,25 +27,25 @@ let bundleID = Bundle.main.bundleIdentifier ?? "io.macadmins.Outset"
 let osLog = OSLog(subsystem: bundleID, category: "main")
 // We could make these availab as preferences perhaps
 let logFileName = "outset.log"
-// The managed log directory is shared by root and user contexts. The installer
-// creates it root:wheel mode 1777 (world-writable, sticky), and a root-context
-// run creates it that way if it is missing. Any context that can write there
-// logs there; when the directory is absent or not writable, or the file cannot
-// be opened, the log falls back to ~/Library/Logs so user agents always have a
-// place to write.
+// Logs are split by context. A root run logs under the managed log directory,
+// which only root can write: root:wheel 0755, files 0644, and no symlink
+// anywhere in its folder chain. A user-context run (login-every, login-once,
+// on-demand) logs under ~/Library/Logs/Managed State instead, in the same
+// YYYY-MM-DD/HHMMSS/ layout, and never touches the managed directory.
 let managedLogDirectory = "/Library/Managed State/logs"
-let managedLogDirectoryMode: mode_t = 0o1777
-let managedLogFileMode: mode_t = 0o666
+/// Trailing components of `managedLogDirectory` that outset owns and locks:
+/// "Managed State" and "logs". Everything above them must already be root-only.
+let managedLogOwnedComponents = 2
+let managedLogDirectoryMode: mode_t = 0o755
+let managedLogFileMode: mode_t = 0o644
+let userLogSubpath = "Library/Logs/Managed State"
 var userLogDirectory: String {
-    return FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Logs")
-        .path
+    return userLogDirectoryPath(home: FileManager.default.homeDirectoryForCurrentUser.path)
 }
 var logDirectory: String {
-    if managedLogDirectoryIsWritable() {
-        return managedLogDirectory
-    }
-    return userLogDirectory
+    return resolveLogDirectory(isRoot: geteuid() == 0,
+                               managedReady: geteuid() == 0 && managedLogDirectoryIsReady,
+                               userDirectory: userLogDirectory)
 }
 /// The file this run's lines go to: its session directory's outset.log when the
 /// run has a session, otherwise the flat log at the root, as builds before the
