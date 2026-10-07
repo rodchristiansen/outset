@@ -12,6 +12,8 @@
     <string>Managed State Keeper</string>
     <key>CFBundleIconFile</key>
     <string>ManagedStateKeeper</string>
+    <key>CFBundleIconName</key>
+    <string>ManagedStateKeeper</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

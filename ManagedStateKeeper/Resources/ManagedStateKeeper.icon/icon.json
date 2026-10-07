@@ -1,0 +1,39 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "display-p3:0.54900,0.82000,0.41600,1.00000",
+      "display-p3:0.23100,0.40000,0.15700,1.00000"
+    ]
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "glass": true,
+          "image-name": "gear.png",
+          "name": "Gear",
+          "position": {
+            "scale": 1.5,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.5
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}
