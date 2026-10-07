@@ -38,11 +38,13 @@ all: pkg
 # Record the SDK the binaries are linked against. Some toolchains write the
 # deployment target as the SDK version, and AppKit then keeps the pre-macOS 26
 # window chrome (a title bar plus a small tab strip) instead of the toolbar tabs.
+# The version is stamped after linking with vtool, because linker flags passed
+# through a universal SwiftPM build reach clang without -Xlinker on some Xcodes.
 SDK_VERSION := $(shell xcrun --show-sdk-version)
-SWIFT_LINK_FLAGS = -Xlinker -platform_version -Xlinker macos -Xlinker 14.0 -Xlinker $(SDK_VERSION)
+DEPLOYMENT_TARGET = 14.0
 
 build:
-	swift build -c release --arch arm64 --arch x86_64 $(SWIFT_LINK_FLAGS)
+	swift build -c release --arch arm64 --arch x86_64
 
 test:
 	swift test
@@ -53,6 +55,10 @@ app: build
 	@cp "$(SWIFT_BUILD_DIR)/ManagedStateKeeperApp" "$(APP_CONTENTS)/MacOS/$(GUI_BINARY_NAME)"
 	@cp "$(SWIFT_BUILD_DIR)/ManagedStateKeeperHelper" "$(APP_CONTENTS)/MacOS/$(HELPER_BINARY_NAME)"
 	@chmod 755 "$(APP_CONTENTS)/MacOS/"*
+	@for bin in "$(APP_CONTENTS)/MacOS/"*; do \
+		vtool -set-build-version macos $(DEPLOYMENT_TARGET) $(SDK_VERSION) -replace -output "$$bin.stamped" "$$bin" && \
+		mv "$$bin.stamped" "$$bin" && codesign --force --sign - "$$bin" 2>/dev/null; \
+	done
 	@sed -e 's/{{MARKETING_VERSION}}/$(MARKETING_VERSION)/g' \
 	     -e 's/{{BUILD_NUMBER}}/$(BUILD_NUMBER)/g' \
 	     packaging/resources/Info.plist.template > "$(APP_CONTENTS)/Info.plist"
