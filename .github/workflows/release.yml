@@ -55,11 +55,27 @@ jobs:
           rm -f artifacts/Outset-component.pkg
           shasum -a 256 "artifacts/Outset-${VERSION}.pkg" > "artifacts/Outset-${VERSION}.pkg.sha256"
 
+      - name: Build unsigned Managed State Keeper package
+        working-directory: ManagedStateKeeper
+        run: |
+          set -euo pipefail
+          # Link against a macOS 26 SDK, as BootstrapMate's release does, so the
+          # window gets the macOS 26 toolbar tabs rather than the older title bar.
+          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XCODE" ]; then export DEVELOPER_DIR="$XCODE/Contents/Developer"; fi
+          xcrun --show-sdk-version
+          GUI_VERSION=$(date -u '+%Y.%m.%d.%H%M')
+          make pkg VERSION="$GUI_VERSION"
+          cp "build/ManagedStateKeeper-${GUI_VERSION}.pkg" ../artifacts/
+          cd ../artifacts && shasum -a 256 "ManagedStateKeeper-${GUI_VERSION}.pkg" > "ManagedStateKeeper-${GUI_VERSION}.pkg.sha256"
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           name: Outset ${{ steps.ver.outputs.VERSION }}
-          body: Unsigned package built from this tag. Sign and notarize it with your own Developer ID before deployment.
+          body: Unsigned packages built from this tag, outset and the Managed State Keeper window. Sign and notarize them with your own Developer ID before deployment; the Managed State Keeper helper refuses every client until it is signed.
           files: |
             artifacts/Outset-${{ steps.ver.outputs.VERSION }}.pkg
             artifacts/Outset-${{ steps.ver.outputs.VERSION }}.pkg.sha256
+            artifacts/ManagedStateKeeper-*.pkg
+            artifacts/ManagedStateKeeper-*.pkg.sha256
