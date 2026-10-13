@@ -3,7 +3,9 @@
 //  Managed State Keeper
 //
 //  Prefs tab: centred app header, then outset's preferences in two columns of
-//  cards. Managed settings show their managed value, locked.
+//  cards, then a read-only list of outset's launchd jobs. Settings a profile
+//  manages show their managed value, disabled (gray); one banner under the
+//  header explains why, instead of a caption on every field.
 //
 
 import SwiftUI
@@ -26,6 +28,10 @@ struct SettingsView: View {
             VStack(spacing: 16) {
                 appInfoHeader
 
+                if viewModel.hasManagedSettings {
+                    ProfileManagedBanner()
+                }
+
                 Divider()
 
                 HStack(alignment: .top, spacing: 20) {
@@ -42,6 +48,13 @@ struct SettingsView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
+
+                ServicesSection(
+                    prefixes: ["io.macadmins.Outset"],
+                    extraDaemonDirectories: [
+                        Bundle.main.bundleURL.appendingPathComponent("Contents/Library/LaunchDaemons").path
+                    ]
+                )
 
                 HStack {
                     Spacer()
@@ -164,8 +177,6 @@ struct SettingsView: View {
                 switch viewModel.signingKeyState {
                 case .managed:
                     Text("Set; every script must carry a valid signature.")
-                    Label("Managed", systemImage: "lock.fill")
-                        .font(.caption)
                         .foregroundStyle(.secondary)
                 case .ignored:
                     Text("Set outside a configuration profile, so outset ignores it.")
@@ -230,11 +241,6 @@ struct SettingsView: View {
             }
             content()
                 .disabled(managed)
-            if managed {
-                Label("Managed", systemImage: "lock.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 }

@@ -84,6 +84,13 @@ final class SettingsViewModel {
         }
     }
 
+    /// True when a profile forces at least one of outset's keys, the signing
+    /// key included.
+    var hasManagedSettings: Bool {
+        if case .managed = signingKeyState { return true }
+        return !managedKeys.isEmpty
+    }
+
     func isManaged(_ key: OutsetPreferenceKey) -> Bool {
         managedKeys.contains(key.rawValue)
     }
