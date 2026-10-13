@@ -214,6 +214,93 @@ private struct FakeSource: PreferenceSource {
     }
 }
 
+// MARK: - Explicit save with an administrator's authorization
+
+@MainActor final class FakeAuthorizer: AdminAuthorizing {
+    var grant: Data?
+    var prompts = 0
+    var releases = 0
+    init(grant: Data?) { self.grant = grant }
+    func authorize() -> Data? { prompts += 1; return grant }
+    func release() { releases += 1 }
+}
+
+@MainActor final class FakeWriter: PreferenceWriting {
+    var performed: [(PreferenceWrite, Data)] = []
+    func perform(_ write: PreferenceWrite, authorization: Data) async -> Bool {
+        performed.append((write, authorization))
+        return true
+    }
+}
+
+@Suite @MainActor struct SaveTests {
+    private func makeModel(managed: Set<String> = [], grant: Data? = Data([1, 2, 3])) -> (SettingsViewModel, FakeAuthorizer, FakeWriter) {
+        let authorizer = FakeAuthorizer(grant: grant)
+        let writer = FakeWriter()
+        let model = SettingsViewModel(source: FakeSource(values: ["network_timeout": 30], managed: managed), authorizer: authorizer)
+        model.configure(client: writer)
+        model.load()
+        return (model, authorizer, writer)
+    }
+
+    @Test func editsAreHeldUntilSaved() {
+        let (model, authorizer, writer) = makeModel()
+        #expect(!model.hasUnsavedChanges)
+        model.verboseLogging = true
+        #expect(model.hasUnsavedChanges)
+        #expect(authorizer.prompts == 0)
+        #expect(writer.performed.isEmpty)
+    }
+
+    @Test func revertRestoresTheSavedValues() {
+        let (model, _, _) = makeModel()
+        model.networkTimeout = 90
+        model.ignoredUsersText = "guest"
+        model.revert()
+        #expect(model.networkTimeout == 30)
+        #expect(model.ignoredUsersText.isEmpty)
+        #expect(!model.hasUnsavedChanges)
+    }
+
+    @Test func saveAsksOnceAndPassesTheAuthorizationToEveryWrite() async {
+        let (model, authorizer, writer) = makeModel()
+        model.verboseLogging = true
+        model.networkTimeout = 90
+        await model.save()
+        #expect(authorizer.prompts == 1)
+        #expect(authorizer.releases == 1)
+        #expect(writer.performed.count == 2)
+        #expect(writer.performed.allSatisfy { $0.1 == Data([1, 2, 3]) })
+        #expect(!model.hasUnsavedChanges)
+    }
+
+    @Test func cancellingThePromptKeepsTheEdits() async {
+        let (model, authorizer, writer) = makeModel(grant: nil)
+        model.verboseLogging = true
+        await model.save()
+        #expect(authorizer.prompts == 1)
+        #expect(writer.performed.isEmpty)
+        #expect(model.hasUnsavedChanges)
+        #expect(model.saveStatus == .idle)
+    }
+
+    @Test func managedKeysAreNeverWrittenOrCountedAsChanges() async {
+        let (model, authorizer, writer) = makeModel(managed: ["network_timeout"])
+        model.networkTimeout = 90
+        #expect(!model.hasUnsavedChanges)
+        await model.save()
+        #expect(authorizer.prompts == 0)
+        #expect(writer.performed.isEmpty)
+    }
+
+    @Test func fullyManagedWindowIsReadOnly() {
+        let (model, _, _) = makeModel(managed: Set(OutsetPreferenceKey.allCases.map(\.rawValue)))
+        #expect(model.isFullyManaged)
+        let (partial, _, _) = makeModel(managed: ["network_timeout"])
+        #expect(!partial.isFullyManaged)
+    }
+}
+
 // MARK: - Helper write policy for profile-forced keys
 
 @Suite struct ForcedKeyWriteTests {

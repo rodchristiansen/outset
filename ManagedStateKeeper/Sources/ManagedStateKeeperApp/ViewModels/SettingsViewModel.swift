@@ -3,8 +3,9 @@
 //  Managed State Keeper
 //
 //  outset's preferences for the Prefs tab. Values are read the way the root
-//  engine reads them; managed keys are shown locked and never written. Edits
-//  auto-save through the privileged helper.
+//  engine reads them; managed keys are shown gray and never written. Other
+//  edits are held until the user saves; Save asks for an administrator and
+//  writes through the privileged helper, which checks that authorization.
 //
 
 import Foundation
@@ -26,6 +27,29 @@ enum PreferenceWrite: Equatable {
     case int(OutsetPreferenceKey, Int)
     case array(OutsetPreferenceKey, [String])
     case remove(OutsetPreferenceKey)
+
+    var key: OutsetPreferenceKey {
+        switch self {
+        case .bool(let key, _), .int(let key, _), .array(let key, _), .remove(let key): key
+        }
+    }
+}
+
+/// Performs one write with an administrator's authorization.
+@MainActor
+protocol PreferenceWriting: AnyObject {
+    func perform(_ write: PreferenceWrite, authorization: Data) async -> Bool
+}
+
+extension XPCClient: PreferenceWriting {
+    func perform(_ write: PreferenceWrite, authorization: Data) async -> Bool {
+        switch write {
+        case .bool(let key, let value): await setBoolPreference(key: key, value: value, authorization: authorization)
+        case .int(let key, let value): await setIntPreference(key: key, value: value, authorization: authorization)
+        case .array(let key, let value): await setArrayPreference(key: key, value: value, authorization: authorization)
+        case .remove(let key): await removePreference(key: key, authorization: authorization)
+        }
+    }
 }
 
 @Observable
@@ -34,11 +58,11 @@ final class SettingsViewModel {
 
     // MARK: - Values
 
-    var waitForNetwork = false { didSet { scheduleAutoSave() } }
-    var networkTimeout = 180 { didSet { scheduleAutoSave() } }
-    var backgroundScriptTimeout = 0 { didSet { scheduleAutoSave() } }
-    var ignoredUsersText = "" { didSet { scheduleAutoSave() } }
-    var verboseLogging = false { didSet { scheduleAutoSave() } }
+    var waitForNetwork = false
+    var networkTimeout = 180
+    var backgroundScriptTimeout = 0
+    var ignoredUsersText = ""
+    var verboseLogging = false
 
     /// What outset does with the script-signing key.
     enum SigningKeyState: Equatable {
@@ -58,30 +82,37 @@ final class SettingsViewModel {
     }
     private(set) var saveStatus: SaveStatus = .idle
 
-    // MARK: - Auto-Save
+    // MARK: - Save
 
     private let source: PreferenceSource
-    private var xpcClient: XPCClient?
-    private var autoSaveTask: Task<Void, Never>?
-    private var isLoading = false
+    private let authorizer: AdminAuthorizing
+    private var writer: PreferenceWriting?
     private var saved = PreferenceSnapshot()
 
-    init(source: PreferenceSource = SystemPreferenceSource()) {
+    init(source: PreferenceSource = SystemPreferenceSource(), authorizer: AdminAuthorizing = AdminAuthorization()) {
         self.source = source
+        self.authorizer = authorizer
     }
 
-    func configure(client: XPCClient) {
-        xpcClient = client
+    func configure(client: PreferenceWriting) {
+        writer = client
     }
 
-    private func scheduleAutoSave() {
-        guard !isLoading, xpcClient != nil else { return }
-        autoSaveTask?.cancel()
-        autoSaveTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(0.75))
-            guard !Task.isCancelled, let self else { return }
-            await self.save()
-        }
+    /// True when an edit to a key no profile manages has not been saved.
+    var hasUnsavedChanges: Bool {
+        !Self.writes(from: saved, to: current, managed: managedKeys).isEmpty
+    }
+
+    /// True when a profile manages every key the window edits, so there is
+    /// nothing to save and the window is read-only.
+    var isFullyManaged: Bool {
+        OutsetPreferenceKey.allCases.allSatisfy { managedKeys.contains($0.rawValue) }
+    }
+
+    /// Discards unsaved edits.
+    func revert() {
+        apply(saved)
+        if case .failed = saveStatus { saveStatus = .idle }
     }
 
     /// True when a profile forces at least one of outset's keys, the signing
@@ -98,9 +129,6 @@ final class SettingsViewModel {
     // MARK: - Load
 
     func load() {
-        isLoading = true
-        defer { isLoading = false }
-
         managedKeys = Set(OutsetPreferenceKey.allCases.map(\.rawValue).filter(source.isManaged))
         let snapshot = Self.read(from: source)
         apply(snapshot)
@@ -201,24 +229,22 @@ final class SettingsViewModel {
         return writes
     }
 
+    /// Asks for an administrator once, then writes every pending change with
+    /// that authorization and destroys it. Cancelling the prompt keeps the
+    /// edits in place, unsaved.
     func save() async {
-        guard let client = xpcClient else { return }
+        guard let writer, saveStatus != .saving else { return }
         let target = current
         let pending = Self.writes(from: saved, to: target, managed: managedKeys)
         guard !pending.isEmpty else { return }
 
+        guard let authorization = authorizer.authorize() else { return }
+        defer { authorizer.release() }
+
         saveStatus = .saving
         var failed: [String] = []
-        for write in pending {
-            let ok: Bool
-            let key: OutsetPreferenceKey
-            switch write {
-            case .bool(let k, let value): key = k; ok = await client.setBoolPreference(key: k, value: value)
-            case .int(let k, let value): key = k; ok = await client.setIntPreference(key: k, value: value)
-            case .array(let k, let value): key = k; ok = await client.setArrayPreference(key: k, value: value)
-            case .remove(let k): key = k; ok = await client.removePreference(key: k)
-            }
-            if !ok { failed.append(key.rawValue) }
+        for write in pending where !(await writer.perform(write, authorization: authorization)) {
+            failed.append(write.key.rawValue)
         }
 
         if failed.isEmpty {
@@ -227,7 +253,7 @@ final class SettingsViewModel {
             try? await Task.sleep(for: .seconds(2.5))
             if saveStatus == .saved { saveStatus = .idle }
         } else {
-            saveStatus = .failed("Could not save \(failed.joined(separator: ", ")): the helper is not available")
+            saveStatus = .failed("Could not save \(failed.joined(separator: ", ")): the helper refused or is not available")
         }
     }
 }

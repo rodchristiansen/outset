@@ -4,8 +4,11 @@
 //
 //  Prefs tab: centred app header, then outset's preferences in two columns of
 //  cards, then a read-only list of outset's launchd jobs. Settings a profile
-//  manages show their managed value, disabled (gray); one banner under the
-//  header explains why, instead of a caption on every field.
+//  manages show their managed value, disabled (gray), and only the profile
+//  can change them; one banner under the header explains why, instead of a
+//  caption on every field. Every other setting is editable, and Save asks for
+//  an administrator before the helper writes it. When a profile manages every
+//  setting the tab is simply read-only, with no Save.
 //
 
 import SwiftUI
@@ -49,18 +52,14 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
 
+                saveBar
+
                 ServicesSection(
                     prefixes: ["io.macadmins.Outset"],
                     extraDaemonDirectories: [
                         Bundle.main.bundleURL.appendingPathComponent("Contents/Library/LaunchDaemons").path
                     ]
                 )
-
-                HStack {
-                    Spacer()
-                    saveStatusLabel
-                }
-                .padding(.top, 4)
             }
             .padding()
         }
@@ -98,7 +97,32 @@ struct SettingsView: View {
         .padding(.top, 8)
     }
 
-    // MARK: - Auto-Save Status
+    // MARK: - Save
+
+    /// Status, then Revert and Save. Absent when a profile manages every
+    /// setting, since nothing here can change.
+    @ViewBuilder
+    private var saveBar: some View {
+        if !viewModel.isFullyManaged {
+            HStack(spacing: 12) {
+                saveStatusLabel
+                Spacer()
+                Button("Revert") {
+                    viewModel.revert()
+                }
+                .disabled(!viewModel.hasUnsavedChanges || viewModel.saveStatus == .saving)
+                .help("Discard the changes you have not saved")
+
+                Button("Save") {
+                    Task { await viewModel.save() }
+                }
+                .keyboardShortcut("s", modifiers: .command)
+                .buttonStyle(.borderedProminent)
+                .disabled(!viewModel.hasUnsavedChanges || viewModel.saveStatus == .saving)
+                .help("An administrator name and password is needed to save")
+            }
+        }
+    }
 
     @ViewBuilder
     private var saveStatusLabel: some View {
