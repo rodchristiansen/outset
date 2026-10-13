@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import Security
 import ManagedStateKeeperXPC
 
 final class HelperCommandRunner: NSObject, HelperXPCProtocol, @unchecked Sendable {
@@ -134,27 +135,54 @@ final class HelperCommandRunner: NSObject, HelperXPCProtocol, @unchecked Sendabl
     // MARK: - Preferences
     //
     // Writes land in /Library/Preferences/io.macadmins.Outset.plist
-    // (any user, any host), the file the root engine reads. The domain is fixed
-    // and only the keys the window edits are accepted.
+    // (any user, any host), the file the root engine reads. The domain is fixed,
+    // only the keys the window edits are accepted, and every write needs an
+    // administrator's authorization.
 
-    func setBoolPreference(key: String, value: Bool, withReply reply: @escaping (Bool) -> Void) {
-        write(key: key, value: value as CFBoolean, reply: reply)
+    /// True when `externalForm` is an authorization reference that already
+    /// holds the admin right. The helper never prompts: the GUI asked the
+    /// administrator, and this only confirms the credential it was given.
+    static func isAdminAuthorized(_ externalForm: Data) -> Bool {
+        guard externalForm.count == MemoryLayout<AuthorizationExternalForm>.size else { return false }
+        var form = AuthorizationExternalForm()
+        withUnsafeMutableBytes(of: &form) { buffer in
+            _ = externalForm.copyBytes(to: buffer)
+        }
+        var authRef: AuthorizationRef?
+        guard AuthorizationCreateFromExternalForm(&form, &authRef) == errAuthorizationSuccess, let authRef else {
+            return false
+        }
+        defer { AuthorizationFree(authRef, []) }
+
+        return StateKeeperConstants.adminRight.withCString { name in
+            var item = AuthorizationItem(name: name, valueLength: 0, value: nil, flags: 0)
+            return withUnsafeMutablePointer(to: &item) { itemPointer in
+                var rights = AuthorizationRights(count: 1, items: itemPointer)
+                let status = AuthorizationCopyRights(authRef, &rights, nil, [.extendRights], nil)
+                return status == errAuthorizationSuccess
+            }
+        }
     }
 
-    func setIntPreference(key: String, value: Int, withReply reply: @escaping (Bool) -> Void) {
-        write(key: key, value: value as CFNumber, reply: reply)
+    func setBoolPreference(key: String, value: Bool, authorization: Data, withReply reply: @escaping (Bool) -> Void) {
+        write(key: key, value: value as CFBoolean, authorization: authorization, reply: reply)
     }
 
-    func setArrayPreference(key: String, value: [String], withReply reply: @escaping (Bool) -> Void) {
-        write(key: key, value: value as CFArray, reply: reply)
+    func setIntPreference(key: String, value: Int, authorization: Data, withReply reply: @escaping (Bool) -> Void) {
+        write(key: key, value: value as CFNumber, authorization: authorization, reply: reply)
     }
 
-    func removePreference(key: String, withReply reply: @escaping (Bool) -> Void) {
-        write(key: key, value: nil, reply: reply)
+    func setArrayPreference(key: String, value: [String], authorization: Data, withReply reply: @escaping (Bool) -> Void) {
+        write(key: key, value: value as CFArray, authorization: authorization, reply: reply)
     }
 
-    private func write(key: String, value: CFPropertyList?, reply: @escaping (Bool) -> Void) {
-        guard OutsetPreferenceKey.isWritable(key, isForced: Self.isForced) else {
+    func removePreference(key: String, authorization: Data, withReply reply: @escaping (Bool) -> Void) {
+        write(key: key, value: nil, authorization: authorization, reply: reply)
+    }
+
+    private func write(key: String, value: CFPropertyList?, authorization: Data, reply: @escaping (Bool) -> Void) {
+        guard OutsetPreferenceKey.isWritable(key, isForced: Self.isForced),
+              Self.isAdminAuthorized(authorization) else {
             reply(false)
             return
         }

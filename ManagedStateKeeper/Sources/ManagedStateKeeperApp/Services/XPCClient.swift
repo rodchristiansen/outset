@@ -122,20 +122,23 @@ final class XPCClient: NSObject {
 
     // MARK: - Preference Management
 
-    func setBoolPreference(key: OutsetPreferenceKey, value: Bool) async -> Bool {
-        await callHelper { proxy, reply in proxy.setBoolPreference(key: key.rawValue, value: value, withReply: reply) }
+    // Each write carries the administrator authorization the caller obtained
+    // for this save; the helper refuses a write without it.
+
+    func setBoolPreference(key: OutsetPreferenceKey, value: Bool, authorization: Data) async -> Bool {
+        await callHelper { proxy, reply in proxy.setBoolPreference(key: key.rawValue, value: value, authorization: authorization, withReply: reply) }
     }
 
-    func setIntPreference(key: OutsetPreferenceKey, value: Int) async -> Bool {
-        await callHelper { proxy, reply in proxy.setIntPreference(key: key.rawValue, value: value, withReply: reply) }
+    func setIntPreference(key: OutsetPreferenceKey, value: Int, authorization: Data) async -> Bool {
+        await callHelper { proxy, reply in proxy.setIntPreference(key: key.rawValue, value: value, authorization: authorization, withReply: reply) }
     }
 
-    func setArrayPreference(key: OutsetPreferenceKey, value: [String]) async -> Bool {
-        await callHelper { proxy, reply in proxy.setArrayPreference(key: key.rawValue, value: value, withReply: reply) }
+    func setArrayPreference(key: OutsetPreferenceKey, value: [String], authorization: Data) async -> Bool {
+        await callHelper { proxy, reply in proxy.setArrayPreference(key: key.rawValue, value: value, authorization: authorization, withReply: reply) }
     }
 
-    func removePreference(key: OutsetPreferenceKey) async -> Bool {
-        await callHelper { proxy, reply in proxy.removePreference(key: key.rawValue, withReply: reply) }
+    func removePreference(key: OutsetPreferenceKey, authorization: Data) async -> Bool {
+        await callHelper { proxy, reply in proxy.removePreference(key: key.rawValue, authorization: authorization, withReply: reply) }
     }
 
     // MARK: - Private

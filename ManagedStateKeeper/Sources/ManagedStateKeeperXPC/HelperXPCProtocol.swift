@@ -30,6 +30,9 @@ public enum StateKeeperConstants {
     }
     /// The file outset's on-demand LaunchAgent watches in the user's session.
     public static let onDemandTrigger = "/private/tmp/.io.macadmins.outset.ondemand.launchd"
+    /// The authorization right an administrator must hold before the helper
+    /// writes a preference. A standard user can run outset, never change it.
+    public static let adminRight = "system.privilege.admin"
 }
 
 /// The outset runs that make sense to start by hand. Each maps to fixed engine
@@ -115,10 +118,12 @@ public enum OutsetPreferenceKey: String, CaseIterable, Sendable {
     func stop()
 
     /// Write a preference to /Library/Preferences/io.macadmins.Outset.plist.
-    func setBoolPreference(key: String, value: Bool, withReply reply: @escaping (Bool) -> Void)
-    func setIntPreference(key: String, value: Int, withReply reply: @escaping (Bool) -> Void)
-    func setArrayPreference(key: String, value: [String], withReply reply: @escaping (Bool) -> Void)
-    func removePreference(key: String, withReply reply: @escaping (Bool) -> Void)
+    /// `authorization` is an AuthorizationExternalForm the GUI obtained after an
+    /// administrator authenticated; the helper refuses the write without it.
+    func setBoolPreference(key: String, value: Bool, authorization: Data, withReply reply: @escaping (Bool) -> Void)
+    func setIntPreference(key: String, value: Int, authorization: Data, withReply reply: @escaping (Bool) -> Void)
+    func setArrayPreference(key: String, value: [String], authorization: Data, withReply reply: @escaping (Bool) -> Void)
+    func removePreference(key: String, authorization: Data, withReply reply: @escaping (Bool) -> Void)
 
     /// The helper's version, to confirm it is alive.
     func getHelperVersion(withReply reply: @escaping (String) -> Void)
@@ -144,7 +149,7 @@ public extension NSXPCInterface {
         let classes = NSSet(array: [NSArray.self, NSString.self]) as! Set<AnyHashable>
         interface.setClasses(
             classes,
-            for: #selector(HelperXPCProtocol.setArrayPreference(key:value:withReply:)),
+            for: #selector(HelperXPCProtocol.setArrayPreference(key:value:authorization:withReply:)),
             argumentIndex: 1,
             ofReply: false
         )
