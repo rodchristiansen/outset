@@ -60,12 +60,35 @@ struct SettingsView: View {
                         Bundle.main.bundleURL.appendingPathComponent("Contents/Library/LaunchDaemons").path
                     ]
                 )
+
+                footer
             }
             .padding()
         }
         .onAppear {
             viewModel.configure(client: xpcClient)
             viewModel.load()
+            // AppKit makes the first key view first responder when the window
+            // opens, which draws a focus ring on a control nobody chose. Start
+            // with nothing focused; Tab still reaches every control.
+            DispatchQueue.main.async {
+                (NSApp.keyWindow ?? NSApp.mainWindow)?.makeFirstResponder(nil)
+            }
+        }
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        HStack(spacing: 12) {
+            Text("v\(marketingVersion) (\(buildNumber))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Link("Documentation", destination: URL(string: "https://github.com/rodchristiansen/outset#readme")!)
+                .font(.caption)
+            Link("Report Issue", destination: URL(string: "https://github.com/macadmins/outset/issues")!)
+                .font(.caption)
+            Spacer()
         }
     }
 
@@ -86,13 +109,6 @@ struct SettingsView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-
-            HStack(spacing: 16) {
-                Link("Documentation", destination: URL(string: "https://github.com/rodchristiansen/outset#readme")!)
-                    .font(.caption)
-                Link("Report Issue", destination: URL(string: "https://github.com/macadmins/outset/issues")!)
-                    .font(.caption)
-            }
         }
         .padding(.top, 8)
     }
