@@ -20,8 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Compare complete calendar dates during log rotation so logs from the same day number in an earlier month or year rotate correctly.
-
 - **Managed profile payload processing** (`Login.swift`, `Payloads.swift`, closes #64): three related bugs prevented scripts delivered via MDM managed profiles from running correctly when local Outset directories were empty. (1) The `login-privileged` trigger was only created when the local `login-privileged-once`/`every` directories were non-empty, so privileged scripts delivered exclusively via payload were silently skipped. The condition now also checks whether the payload itself contains privileged scripts. (2) `processPayloadScripts()` returned `true` (suppressing local directory fallback) even when the scripts dictionary was present but empty; it now tracks whether any script was actually dispatched. (3) Boot-once run-once tracking was written via a redundant manual `writeRunOncePlist` call after `processScripts()`, bypassing the deduplication check inside `processScripts`; the redundant call has been removed.
 
 - **DMG package installation** (`installPackage`): corrected a variable assignment bug where the DMG mount path was used as the package path instead of the actual `.pkg`/`.mpkg` file path. Also fixed a loop that overwrote a single variable on each iteration, meaning only the last package in a DMG was ever installed. Packages found inside a mounted DMG are now collected into an array and each is installed in turn. The DMG is detached synchronously after all packages have been processed (no change in behaviour — `runShellCommand` has always been synchronous).
