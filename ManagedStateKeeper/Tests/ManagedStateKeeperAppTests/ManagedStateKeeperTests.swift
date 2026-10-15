@@ -153,7 +153,7 @@ private struct FakeSource: PreferenceSource {
         // A stored false is off, as the engine reads it.
         #expect(!snapshot.waitForNetwork)
         #expect(snapshot.networkTimeout == 60)
-        #expect(snapshot.backgroundScriptTimeout == 0)
+        #expect(snapshot.backgroundScriptTimeout == 30)
         #expect(snapshot.ignoredUsers == ["admin"])
         #expect(snapshot.verboseLogging)
     }
@@ -168,6 +168,18 @@ private struct FakeSource: PreferenceSource {
 
     @Test func defaultsWhenUnset() {
         #expect(SettingsViewModel.read(from: FakeSource()) == PreferenceSnapshot())
+    }
+
+    @Test func explicitUnlimitedTimeoutSurvivesReload() {
+        let snapshot = SettingsViewModel.read(from: FakeSource(values: ["background_script_timeout": 0]))
+        #expect(snapshot.backgroundScriptTimeout == 0)
+        let writes = SettingsViewModel.writes(from: PreferenceSnapshot(), to: snapshot, managed: [])
+        #expect(writes == [.int(.backgroundScriptTimeout, 0)])
+    }
+
+    @Test func stringBooleanMatchesTheEngine() {
+        let snapshot = SettingsViewModel.read(from: FakeSource(values: ["wait_for_network": "true"]))
+        #expect(!snapshot.waitForNetwork)
     }
 
     @Test func loadMarksManagedKeys() {
@@ -201,7 +213,7 @@ private struct FakeSource: PreferenceSource {
         let writes = SettingsViewModel.writes(from: old, to: new, managed: ["network_timeout"])
         #expect(writes == [
             .bool(.waitForNetwork, true),
-            .remove(.backgroundScriptTimeout),
+            .int(.backgroundScriptTimeout, 0),
             .array(.ignoredUsers, ["admin", "support"]),
             .remove(.verboseLogging)
         ])

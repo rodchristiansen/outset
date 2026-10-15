@@ -6,7 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Privileged login run-once records**: use a per-user record for privileged login scripts and packages while keeping boot records machine-wide.
+
+- **Signing-key persistence**: represent an unset signing key as an empty string so boot-time preference writes contain valid property-list values.
+
+- **Background script timeout**: align with upstream's 30-second default; set `background_script_timeout` to `0` to disable the limit. Preferences now store a concrete integer instead of an optional value.
+
+- **DMG-delivered packages were never installed** (`DMG.swift`, `Packages.swift`): `mountDmg` returned the entire multi-line output of `hdiutil attach` (device nodes and content hints) as if it were the mount point, so the DMG's contents were never found and no packages inside it were installed. This persisted after the 4.3.0 DMG fix. The image is now attached with `-plist` and the mount point is read from the `system-entities` array. If an image cannot be mounted, the item is logged and skipped instead of being processed with an invalid path. Image and package paths are now passed as arguments rather than interpolated into the command string, so paths containing spaces work.
+
+- **`wait_for_network` parsing**: adopt upstream's strict boolean parser and regression tests while retaining managed-preference precedence. Explicit `false` stays disabled; strings such as `"true"` use the default instead of being coerced.
+
 ### Changed
+
+- **Managed State Keeper preference alignment**: a missing background timeout now shows 30 seconds; choosing unlimited stores an explicit `0`. The network-wait setting uses the same boolean interpretation as the engine.
 
 - **Logs split by context** (`Globals.swift`, `Logging.swift`, `SessionLog.swift`, `postinstall`): root runs log under `/Library/Managed State/logs`, which only root can write: root:wheel `0755`, files `0644`. User-context runs (login-every, login-once, on-demand) log under `~/Library/Logs/Managed State` in the same `YYYY-MM-DD/HHMMSS/` layout and never write to the root folder. The root folder is opened one component at a time without following symlinks, and every folder above `Managed State` must be root-owned and writable by no group or other, or root refuses it. On install, and on every root run, a folder or file left world-writable (`1777`/`0666`) by an earlier build is reset to root:wheel `0755`/`0644`; a symlink, a hard-linked file or any other entry inside it is removed rather than followed or re-moded. Managed State Keeper's Logs tab lists root runs and the signed-in user's runs under separate headings.
 
@@ -56,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - All log output from background scripts is tagged `[BG:pid=N]` and streamed line-by-line in real time, allowing background and foreground log lines to interleave naturally.
   - Run-once semantics are fully supported for background scripts; the run-once record is written only on successful exit, with thread-safe access via a serial dispatch queue.
   - A per-script timeout watchdog terminates a background script that exceeds the configured limit and logs an error.
-  - A new optional preference key `background_script_timeout` (integer, seconds, no default) sets the per-script timeout. When not set, Outset waits indefinitely for background scripts to exit.
+  - A new optional preference key `background_script_timeout` (integer, seconds, default 30) sets the per-script timeout. Set it to `0` to wait indefinitely for background scripts to exit.
 
 - **Ed25519 script signing** (`Checksum.swift`, `ItemProcessing.swift`, `Preferences.swift`, `Outset.swift`): scripts can now be signed with an Ed25519 private key, with the signature embedded directly in the script as a `# ed25519: <base64sig>` comment. When an MDM-delivered public key (`manifest_signing_key` preference) is present, every script must carry a valid embedded signature — scripts without a valid signature are refused with an error log. Key details:
   - The signed payload is the script content with any existing `# ed25519:` comment line stripped, so the signature is stable across re-signing.

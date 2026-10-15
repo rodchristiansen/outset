@@ -10,17 +10,17 @@ import Foundation
 typealias RunOnce = [String: Date]
 
 struct OutsetPreferences: Codable {
-    var waitForNetwork: Bool = false
-    var networkTimeout: Int = 180
+    var waitForNetwork: Bool = defaultWaitForNetwork
+    var networkTimeout: Int = defaultNetworkTimeout
     var ignoredUsers: [String] = []
     var overrideLoginOnce: RunOnce = RunOnce()
-    // Optional timeout in seconds for background scripts. When nil, background
-    // scripts run until they exit naturally with no enforced limit.
-    var backgroundScriptTimeout: Int? = nil
+    // Timeout in seconds for background scripts (default 30). A value of 0
+    // disables the limit and background scripts run until they exit naturally.
+    var backgroundScriptTimeout: Int = defaultBackgroundScriptTimeout
     // Optional base64-encoded Ed25519 public key. When present (typically delivered
     // via MDM), every script must carry a valid embedded `# ed25519: <sig>` comment.
     // Scripts without a valid signature are refused.
-    var manifestSigningKey: String? = nil
+    var manifestSigningKey: String = ""
 
     enum CodingKeys: String, CodingKey {
         case waitForNetwork = "wait_for_network"
@@ -33,7 +33,7 @@ struct OutsetPreferences: Codable {
 }
 
 func writeOutsetPreferences(prefs: OutsetPreferences) {
-    if debugMode { showPrefrencePath("Stor") } // (typo?) showPreferencePath
+    if debugMode { showPreferencePath("Stor") }
 
     let defaults = UserDefaults.standard
     let appID = Bundle.main.bundleIdentifier! as CFString
@@ -47,8 +47,6 @@ func writeOutsetPreferences(prefs: OutsetPreferences) {
             // A profile owns a managed key; copying it into /Library/Preferences
             // would leave it behind after the profile is removed.
             if preferenceIsManaged(key) { continue }
-            // A nil optional has no property-list value; leave the key unset.
-            if let optional = child.value as? OptionalProtocol, optional.isNil { continue }
             CFPreferencesSetValue(
                 key as CFString,
                 child.value as CFPropertyList,
@@ -73,7 +71,7 @@ func writeOutsetPreferences(prefs: OutsetPreferences) {
 func loadOutsetPreferences() -> OutsetPreferences {
 
     if debugMode {
-        showPrefrencePath("Load")
+        showPreferencePath("Load")
     }
 
     let defaults = UserDefaults.standard
@@ -85,8 +83,8 @@ func loadOutsetPreferences() -> OutsetPreferences {
         outsetPrefs.networkTimeout = intPreference(rootPreferenceValue("network_timeout")) ?? 180
         outsetPrefs.ignoredUsers = rootPreferenceValue("ignored_users") as? [String] ?? []
         outsetPrefs.overrideLoginOnce = rootPreferenceValue("override_login_once") as? RunOnce ?? [:]
-        outsetPrefs.waitForNetwork = boolPreference(rootPreferenceValue("wait_for_network")) ?? false
-        outsetPrefs.backgroundScriptTimeout = intPreference(rootPreferenceValue("background_script_timeout"))
+        outsetPrefs.waitForNetwork = boolPreference(rootPreferenceValue("wait_for_network"), defaultValue: defaultWaitForNetwork)
+        outsetPrefs.backgroundScriptTimeout = intPreference(rootPreferenceValue("background_script_timeout")) ?? defaultBackgroundScriptTimeout
         // manifest_signing_key is only honoured when MDM-managed (forced). A locally
         // written key could be used to disable script processing without detection,
         // so we ignore it unless it comes from a managed profile. In debug mode a
@@ -96,7 +94,7 @@ func loadOutsetPreferences() -> OutsetPreferences {
         // nothing can satisfy and skip every script.
         let signingKey = nonEmpty(rootPreferenceValue("manifest_signing_key") as? String)
         if signingKeyManaged || debugMode {
-            outsetPrefs.manifestSigningKey = signingKey
+            outsetPrefs.manifestSigningKey = signingKey ?? ""
             if !signingKeyManaged {
                 writeLog("manifest_signing_key is not MDM-managed — accepted in debug mode only", logLevel: .debug)
             }
@@ -108,18 +106,14 @@ func loadOutsetPreferences() -> OutsetPreferences {
         outsetPrefs.networkTimeout = intPreference(defaults.object(forKey: "network_timeout")) ?? 180
         outsetPrefs.ignoredUsers = defaults.array(forKey: "ignored_users") as? [String] ?? []
         outsetPrefs.overrideLoginOnce = defaults.object(forKey: "override_login_once") as? RunOnce ?? [:]
-        outsetPrefs.waitForNetwork = boolPreference(defaults.object(forKey: "wait_for_network")) ?? false
+        outsetPrefs.waitForNetwork = boolPreference(defaults.object(forKey: "wait_for_network"), defaultValue: defaultWaitForNetwork)
         if defaults.object(forKey: "background_script_timeout") != nil {
             outsetPrefs.backgroundScriptTimeout = defaults.integer(forKey: "background_script_timeout")
         }
-        outsetPrefs.manifestSigningKey = nonEmpty(defaults.string(forKey: "manifest_signing_key"))
+        outsetPrefs.manifestSigningKey = nonEmpty(defaults.string(forKey: "manifest_signing_key")) ?? ""
     }
     return outsetPrefs
 }
-
-/// Lets the writer skip nil optionals without knowing their wrapped type.
-protocol OptionalProtocol { var isNil: Bool { get } }
-extension Optional: OptionalProtocol { var isNil: Bool { self == nil } }
 
 /// Whether a configuration profile sets this outset key.
 func preferenceIsManaged(_ key: String) -> Bool {
@@ -147,20 +141,11 @@ func nonEmpty(_ string: String?) -> String? {
     return string
 }
 
-/// Reads a preference as a boolean from a bool, a number or a string such as
-/// "true" or "0". Nil when the key is absent or the value is not a boolean.
-func boolPreference(_ value: Any?) -> Bool? {
-    switch value {
-    case let bool as Bool: return bool
-    case let number as NSNumber: return number.boolValue
-    case let string as String:
-        switch string.lowercased().trimmingCharacters(in: .whitespaces) {
-        case "true", "yes", "1": return true
-        case "false", "no", "0": return false
-        default: return nil
-        }
-    default: return nil
-    }
+// Interprets a raw CFPreferences value as a boolean. Key presence alone must
+// never be treated as true: writeOutsetPreferences persists every key on boot,
+// so the key exists on all installations regardless of its value.
+func boolPreference(_ rawValue: Any?, defaultValue: Bool) -> Bool {
+    return rawValue as? Bool ?? defaultValue
 }
 
 /// Reads a preference as an integer from a number or a numeric string.
@@ -173,17 +158,25 @@ func intPreference(_ value: Any?) -> Int? {
     }
 }
 
-func loadRunOncePlist(bootOnce: Bool = false) -> RunOnce {
+/// Loads the run-once records for the current context.
+///
+/// - Parameter machineScoped: `true` for contexts whose records apply to the
+///   machine as a whole (the boot contexts), which use the bare `run_once` key.
+///   `false` - the default - scopes records to the console user under
+///   `run_once-<username>`. This must reflect the payload context, not merely
+///   whether the process is running as root: the privileged login contexts also
+///   run as root but record per-user.
+func loadRunOncePlist(machineScoped: Bool = false) -> RunOnce {
 
     if debugMode {
-        showPrefrencePath("Load")
+        showPreferencePath("Load")
     }
 
     let defaults = UserDefaults.standard
     var runOnceKey = "run_once"
 
     if isRoot {
-        if !bootOnce {
+        if !machineScoped {
             runOnceKey += "-"+getConsoleUserInfo().username
         }
         return CFPreferencesCopyValue(runOnceKey as CFString, Bundle.main.bundleIdentifier! as CFString, kCFPreferencesAnyUser, kCFPreferencesAnyHost) as? RunOnce ?? [:]
@@ -192,17 +185,22 @@ func loadRunOncePlist(bootOnce: Bool = false) -> RunOnce {
     }
 }
 
-func writeRunOncePlist(runOnceData: RunOnce, bootOnce: Bool = false) {
+/// Persists the run-once records for the current context.
+///
+/// - Parameter machineScoped: see `loadRunOncePlist(machineScoped:)`. Loads and
+///   writes for the same context must always agree, or records are written to a
+///   key that is never read back.
+func writeRunOncePlist(runOnceData: RunOnce, machineScoped: Bool = false) {
 
     if debugMode {
-        showPrefrencePath("Stor")
+        showPreferencePath("Stor")
     }
 
     let defaults = UserDefaults.standard
     var runOnceKey = "run_once"
 
     if isRoot {
-        if !bootOnce {
+        if !machineScoped {
             runOnceKey += "-"+getConsoleUserInfo().username
         }
         CFPreferencesSetValue(runOnceKey as CFString,
@@ -215,7 +213,7 @@ func writeRunOncePlist(runOnceData: RunOnce, bootOnce: Bool = false) {
     }
 }
 
-func showPrefrencePath(_ action: String) {
+func showPreferencePath(_ action: String) {
     var prefsPath: String
     if isRoot {
         prefsPath = "/Library/Preferences".appending("/\(Bundle.main.bundleIdentifier!).plist")

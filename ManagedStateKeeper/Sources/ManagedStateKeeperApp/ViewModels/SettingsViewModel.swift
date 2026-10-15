@@ -16,7 +16,7 @@ struct PreferenceSnapshot: Equatable {
     var waitForNetwork = false
     var networkTimeout = 180
     /// Seconds; 0 means background scripts run with no limit.
-    var backgroundScriptTimeout = 0
+    var backgroundScriptTimeout = 30
     var ignoredUsers: [String] = []
     var verboseLogging = false
 }
@@ -60,7 +60,7 @@ final class SettingsViewModel {
 
     var waitForNetwork = false
     var networkTimeout = 180
-    var backgroundScriptTimeout = 0
+    var backgroundScriptTimeout = 30
     var ignoredUsersText = ""
     var verboseLogging = false
 
@@ -152,9 +152,9 @@ final class SettingsViewModel {
         let waitKey = OutsetPreferenceKey.waitForNetwork.rawValue
         // Read by value, as the engine does from #6 on; an older engine treated
         // any stored value, even false, as on.
-        snapshot.waitForNetwork = boolValue(source.value(forKey: waitKey))
+        snapshot.waitForNetwork = source.value(forKey: waitKey) as? Bool ?? false
         snapshot.networkTimeout = intValue(source.value(forKey: OutsetPreferenceKey.networkTimeout.rawValue)) ?? 180
-        snapshot.backgroundScriptTimeout = intValue(source.value(forKey: OutsetPreferenceKey.backgroundScriptTimeout.rawValue)) ?? 0
+        snapshot.backgroundScriptTimeout = intValue(source.value(forKey: OutsetPreferenceKey.backgroundScriptTimeout.rawValue)) ?? 30
         snapshot.ignoredUsers = source.value(forKey: OutsetPreferenceKey.ignoredUsers.rawValue) as? [String] ?? []
         snapshot.verboseLogging = boolValue(source.value(forKey: OutsetPreferenceKey.verboseLogging.rawValue))
         return snapshot
@@ -216,9 +216,7 @@ final class SettingsViewModel {
             writes.append(.int(.networkTimeout, new.networkTimeout))
         }
         if old.backgroundScriptTimeout != new.backgroundScriptTimeout, allowed(.backgroundScriptTimeout) {
-            writes.append(new.backgroundScriptTimeout > 0
-                ? .int(.backgroundScriptTimeout, new.backgroundScriptTimeout)
-                : .remove(.backgroundScriptTimeout))
+            writes.append(.int(.backgroundScriptTimeout, new.backgroundScriptTimeout))
         }
         if old.ignoredUsers != new.ignoredUsers, allowed(.ignoredUsers) {
             writes.append(new.ignoredUsers.isEmpty ? .remove(.ignoredUsers) : .array(.ignoredUsers, new.ignoredUsers))

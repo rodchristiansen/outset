@@ -14,6 +14,8 @@ struct OutsetPreferencesTests {
         let prefs = OutsetPreferences()
         #expect(prefs.waitForNetwork == false)
         #expect(prefs.networkTimeout == 180)
+        #expect(prefs.backgroundScriptTimeout == 30)
+        #expect(prefs.manifestSigningKey.isEmpty)
         #expect(prefs.ignoredUsers.isEmpty)
         #expect(prefs.overrideLoginOnce.isEmpty)
     }
@@ -47,31 +49,8 @@ struct OutsetPreferencesTests {
     }
 }
 
-@Suite("Preference value parsing")
-struct PreferenceValueParsingTests {
-
-    @Test("A false wait_for_network reads as false, not as present")
-    func falseBoolIsFalse() {
-        #expect(boolPreference(false) == false)
-        #expect(boolPreference(NSNumber(value: false)) == false)
-        #expect(boolPreference(NSNumber(value: 0)) == false)
-        #expect(boolPreference("false") == false)
-        #expect(boolPreference("0") == false)
-    }
-
-    @Test("True values read as true")
-    func trueBoolIsTrue() {
-        #expect(boolPreference(true) == true)
-        #expect(boolPreference(NSNumber(value: 1)) == true)
-        #expect(boolPreference("YES") == true)
-    }
-
-    @Test("A missing or unreadable value has no boolean")
-    func missingBoolIsNil() {
-        #expect(boolPreference(nil) == nil)
-        #expect(boolPreference("maybe") == nil)
-        #expect(boolPreference(["a"]) == nil)
-    }
+@Suite("Integer preference parsing")
+struct IntegerPreferenceParsingTests {
 
     @Test("Integers read from numbers and numeric strings")
     func integers() {
@@ -121,5 +100,80 @@ struct SigningKeyNormalisationTests {
         #expect(nonEmpty("  \n") == nil)
         #expect(nonEmpty(nil) == nil)
         #expect(nonEmpty("MCowBQYDK2VwAyEA") == "MCowBQYDK2VwAyEA")
+    }
+}
+
+@Suite("Run-once record scope")
+struct RunOnceScopeTests {
+
+    // Regression: processScripts chose the run-once key with `isRoot`, which is
+    // true for both --boot and --login-privileged. Privileged login items were
+    // therefore recorded under the machine-wide `run_once` key, so only the
+    // first user to log in ever ran them.
+    @Test("Only the boot contexts are machine scoped")
+    func bootContextsAreMachineScoped() {
+        #expect(PayloadType.bootOnce.machineScoped == true)
+        #expect(PayloadType.bootEvery.machineScoped == true)
+    }
+
+    @Test("Privileged login contexts record per user, not machine wide")
+    func privilegedLoginContextsArePerUser() {
+        #expect(PayloadType.loginPrivilegedOnce.machineScoped == false)
+        #expect(PayloadType.loginPrivilegedEvery.machineScoped == false)
+    }
+
+    @Test("Remaining contexts record per user")
+    func otherContextsArePerUser() {
+        #expect(PayloadType.loginOnce.machineScoped == false)
+        #expect(PayloadType.loginEvery.machineScoped == false)
+        #expect(PayloadType.loginWindow.machineScoped == false)
+        #expect(PayloadType.onDemand.machineScoped == false)
+        #expect(PayloadType.onDemandPrivileged.machineScoped == false)
+        #expect(PayloadType.shared.machineScoped == false)
+    }
+
+    // The two properties are independent: a context can be run-once without
+    // being machine scoped, which is exactly the login-privileged-once case
+    // that the original conflation broke.
+    @Test("Run-once and machine scope are independent")
+    func onceAndScopeAreIndependent() {
+        #expect(PayloadType.loginPrivilegedOnce.once == true)
+        #expect(PayloadType.loginPrivilegedOnce.machineScoped == false)
+        #expect(PayloadType.bootEvery.once == false)
+        #expect(PayloadType.bootEvery.machineScoped == true)
+    }
+}
+
+@Suite("Boolean preference interpretation")
+struct BoolPreferenceTests {
+
+    // Regression: loadOutsetPreferences once treated key *presence* as true.
+    // Because writeOutsetPreferences persists every key on boot, that made
+    // wait_for_network effectively always-on, which disabled auto-login on
+    // every installation.
+    @Test("A stored false loads as false even though the key is present")
+    func storedFalseLoadsAsFalse() {
+        #expect(boolPreference(false, defaultValue: false) == false)
+        #expect(boolPreference(false, defaultValue: true) == false)
+        // CFPreferencesCopyValue returns CF types, which bridge to NSNumber
+        #expect(boolPreference(kCFBooleanFalse as Any, defaultValue: true) == false)
+        #expect(boolPreference(NSNumber(value: false), defaultValue: true) == false)
+    }
+
+    @Test("A stored true loads as true")
+    func storedTrueLoadsAsTrue() {
+        #expect(boolPreference(true, defaultValue: false) == true)
+        #expect(boolPreference(kCFBooleanTrue as Any, defaultValue: false) == true)
+    }
+
+    @Test("A missing key falls back to the default")
+    func missingKeyUsesDefault() {
+        #expect(boolPreference(nil, defaultValue: false) == false)
+        #expect(boolPreference(nil, defaultValue: true) == true)
+    }
+
+    @Test("A non-boolean value falls back to the default")
+    func nonBooleanValueUsesDefault() {
+        #expect(boolPreference("true", defaultValue: false) == false)
     }
 }

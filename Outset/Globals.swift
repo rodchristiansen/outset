@@ -22,6 +22,11 @@ let payloadDirectory = outsetDirectory+"payload/"
 var debugMode: Bool = false
 var prefs = loadOutsetPreferences()
 
+// Set Some Defaults
+let defaultBackgroundScriptTimeout: Int = 30
+let defaultWaitForNetwork: Bool = false
+let defaultNetworkTimeout: Int = 180
+
 // Log Stuff
 let bundleID = Bundle.main.bundleIdentifier ?? "io.macadmins.Outset"
 let osLog = OSLog(subsystem: bundleID, category: "main")
@@ -157,6 +162,22 @@ enum PayloadType {
     var once: Bool {
         switch self {
         case .loginOnce, .bootOnce, .loginPrivilegedOnce:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Whether run-once records for this context apply to the machine as a whole
+    /// rather than to an individual user.
+    ///
+    /// Boot items run before anyone logs in, so their records are machine-wide.
+    /// Every other context is tied to the console user and must record per-user,
+    /// including the privileged login contexts - those run as root but still act
+    /// on behalf of one user, and each user is entitled to their own first run.
+    var machineScoped: Bool {
+        switch self {
+        case .bootOnce, .bootEvery:
             return true
         default:
             return false
