@@ -47,8 +47,6 @@ func writeOutsetPreferences(prefs: OutsetPreferences) {
             // A profile owns a managed key; copying it into /Library/Preferences
             // would leave it behind after the profile is removed.
             if preferenceIsManaged(key) { continue }
-            // A nil optional has no property-list value; leave the key unset.
-            if let optional = child.value as? OptionalProtocol, optional.isNil { continue }
             CFPreferencesSetValue(
                 key as CFString,
                 child.value as CFPropertyList,
@@ -117,10 +115,6 @@ func loadOutsetPreferences() -> OutsetPreferences {
     return outsetPrefs
 }
 
-/// Lets the writer skip nil optionals without knowing their wrapped type.
-protocol OptionalProtocol { var isNil: Bool { get } }
-extension Optional: OptionalProtocol { var isNil: Bool { self == nil } }
-
 /// Whether a configuration profile sets this outset key.
 func preferenceIsManaged(_ key: String) -> Bool {
     CFPreferencesAppValueIsForced(key as CFString, Bundle.main.bundleIdentifier! as CFString)
@@ -164,6 +158,14 @@ func intPreference(_ value: Any?) -> Int? {
     }
 }
 
+/// Loads the run-once records for the current context.
+///
+/// - Parameter machineScoped: `true` for contexts whose records apply to the
+///   machine as a whole (the boot contexts), which use the bare `run_once` key.
+///   `false` - the default - scopes records to the console user under
+///   `run_once-<username>`. This must reflect the payload context, not merely
+///   whether the process is running as root: the privileged login contexts also
+///   run as root but record per-user.
 func loadRunOncePlist(machineScoped: Bool = false) -> RunOnce {
 
     if debugMode {
@@ -183,6 +185,11 @@ func loadRunOncePlist(machineScoped: Bool = false) -> RunOnce {
     }
 }
 
+/// Persists the run-once records for the current context.
+///
+/// - Parameter machineScoped: see `loadRunOncePlist(machineScoped:)`. Loads and
+///   writes for the same context must always agree, or records are written to a
+///   key that is never read back.
 func writeRunOncePlist(runOnceData: RunOnce, machineScoped: Bool = false) {
 
     if debugMode {

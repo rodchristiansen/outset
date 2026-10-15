@@ -8,9 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Privileged login run-once records**: use a per-user record for privileged login scripts and packages while keeping boot records machine-wide.
+
+- **Signing-key persistence**: represent an unset signing key as an empty string so boot-time preference writes contain valid property-list values.
+
 - **Background script timeout**: align with upstream's 30-second default; set `background_script_timeout` to `0` to disable the limit. Preferences now store a concrete integer instead of an optional value.
 
+- **DMG-delivered packages were never installed** (`DMG.swift`, `Packages.swift`): `mountDmg` returned the entire multi-line output of `hdiutil attach` (device nodes and content hints) as if it were the mount point, so the DMG's contents were never found and no packages inside it were installed. This persisted after the 4.3.0 DMG fix. The image is now attached with `-plist` and the mount point is read from the `system-entities` array. If an image cannot be mounted, the item is logged and skipped instead of being processed with an invalid path. Image and package paths are now passed as arguments rather than interpolated into the command string, so paths containing spaces work.
+
+- **`wait_for_network` parsing**: adopt upstream's strict boolean parser and regression tests while retaining managed-preference precedence. Explicit `false` stays disabled; strings such as `"true"` use the default instead of being coerced.
+
 ### Changed
+
+- **Managed State Keeper preference alignment**: a missing background timeout now shows 30 seconds; choosing unlimited stores an explicit `0`. The network-wait setting uses the same boolean interpretation as the engine.
 
 - **Logs split by context** (`Globals.swift`, `Logging.swift`, `SessionLog.swift`, `postinstall`): root runs log under `/Library/Managed State/logs`, which only root can write: root:wheel `0755`, files `0644`. User-context runs (login-every, login-once, on-demand) log under `~/Library/Logs/Managed State` in the same `YYYY-MM-DD/HHMMSS/` layout and never write to the root folder. The root folder is opened one component at a time without following symlinks, and every folder above `Managed State` must be root-owned and writable by no group or other, or root refuses it. On install, and on every root run, a folder or file left world-writable (`1777`/`0666`) by an earlier build is reset to root:wheel `0755`/`0644`; a symlink, a hard-linked file or any other entry inside it is removed rather than followed or re-moded. Managed State Keeper's Logs tab lists root runs and the signed-in user's runs under separate headings.
 
@@ -19,10 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log line format** (`Logging.swift`): log file entries are now written as `[yyyy-MM-dd HH:mm:ss] LEVEL message` in local time, with the level padded to five characters and limited to `DEBUG`, `INFO`, `WARN` and `ERROR` (`default`/`info` map to `INFO`, `fault` maps to `ERROR`). Console and unified log output are unchanged.
 
 - **Log rotation** (`Outset.swift`, `Boot.swift`): the daily rotation check (30 files retained) now runs on every invocation rather than only at boot, and compares the full calendar date rather than the day of month.
-
-- **DMG-delivered packages were never installed** (`DMG.swift`, `Packages.swift`): `mountDmg` returned the entire multi-line output of `hdiutil attach` (device nodes and content hints) as if it were the mount point, so the DMG's contents were never found and no packages inside it were installed. This persisted after the 4.3.0 DMG fix. The image is now attached with `-plist` and the mount point is read from the `system-entities` array. If an image cannot be mounted, the item is logged and skipped instead of being processed with an invalid path. Image and package paths are now passed as arguments rather than interpolated into the command string, so paths containing spaces work.
-
-- **`wait_for_network` enabled whenever the key existed** (`Preferences.swift`): in the root context, `wait_for_network` was evaluated as "key is present" rather than by its value, so an explicit `false` still enabled the network wait. Because every `--boot` run (including the one performed by the installer postinstall) writes all preferences back to `/Library/Preferences`, the key was present on every installation and the network wait was effectively always on. Waiting unloads and reloads `com.apple.loginwindow`, and a reloaded loginwindow does not perform automatic login, so installing Outset silently broke auto-login. The key's boolean value is now used, falling back to the default (`false`) when the key is absent or not a boolean.
 
 ## [4.3.0] - 2026-03-05
 

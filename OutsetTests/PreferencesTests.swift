@@ -14,6 +14,8 @@ struct OutsetPreferencesTests {
         let prefs = OutsetPreferences()
         #expect(prefs.waitForNetwork == false)
         #expect(prefs.networkTimeout == 180)
+        #expect(prefs.backgroundScriptTimeout == 30)
+        #expect(prefs.manifestSigningKey.isEmpty)
         #expect(prefs.ignoredUsers.isEmpty)
         #expect(prefs.overrideLoginOnce.isEmpty)
     }
