@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Background script timeout**: align with upstream's 30-second default; set `background_script_timeout` to `0` to disable the limit. Preferences now store a concrete integer instead of an optional value.
+
 ### Changed
 
 - **Logs split by context** (`Globals.swift`, `Logging.swift`, `SessionLog.swift`, `postinstall`): root runs log under `/Library/Managed State/logs`, which only root can write: root:wheel `0755`, files `0644`. User-context runs (login-every, login-once, on-demand) log under `~/Library/Logs/Managed State` in the same `YYYY-MM-DD/HHMMSS/` layout and never write to the root folder. The root folder is opened one component at a time without following symlinks, and every folder above `Managed State` must be root-owned and writable by no group or other, or root refuses it. On install, and on every root run, a folder or file left world-writable (`1777`/`0666`) by an earlier build is reset to root:wheel `0755`/`0644`; a symlink, a hard-linked file or any other entry inside it is removed rather than followed or re-moded. Managed State Keeper's Logs tab lists root runs and the signed-in user's runs under separate headings.
@@ -56,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - All log output from background scripts is tagged `[BG:pid=N]` and streamed line-by-line in real time, allowing background and foreground log lines to interleave naturally.
   - Run-once semantics are fully supported for background scripts; the run-once record is written only on successful exit, with thread-safe access via a serial dispatch queue.
   - A per-script timeout watchdog terminates a background script that exceeds the configured limit and logs an error.
-  - A new optional preference key `background_script_timeout` (integer, seconds, no default) sets the per-script timeout. When not set, Outset waits indefinitely for background scripts to exit.
+  - A new optional preference key `background_script_timeout` (integer, seconds, default 30) sets the per-script timeout. Set it to `0` to wait indefinitely for background scripts to exit.
 
 - **Ed25519 script signing** (`Checksum.swift`, `ItemProcessing.swift`, `Preferences.swift`, `Outset.swift`): scripts can now be signed with an Ed25519 private key, with the signature embedded directly in the script as a `# ed25519: <base64sig>` comment. When an MDM-delivered public key (`manifest_signing_key` preference) is present, every script must carry a valid embedded signature — scripts without a valid signature are refused with an error log. Key details:
   - The signed payload is the script content with any existing `# ed25519:` comment line stripped, so the signature is stable across re-signing.
